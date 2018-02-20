@@ -169,7 +169,6 @@ def transit_periodogram_impl(
         np.ndarray[DTYPE_t, mode='c'] flux_ivar_array,
         np.ndarray[IDTYPE_t, mode='c'] duration_int_array,
 
-        double period,
         double bin_duration,
         double sum_flux2,
         double sum_flux,
@@ -179,7 +178,9 @@ def transit_periodogram_impl(
         double ninf,
 
         int oversample,
-        int use_likelihood):
+        int use_likelihood,
+        double period,
+):
 
     cdef double* time = <double*>time_array.data
     cdef double* flux = <double*>flux_array.data
