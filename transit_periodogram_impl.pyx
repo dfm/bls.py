@@ -2,7 +2,6 @@ import numpy as np
 cimport numpy as np
 
 cimport cython
-from cython.parallel import prange
 
 from libc.math cimport sqrt
 from libc.stdlib cimport malloc, free
@@ -10,8 +9,8 @@ from libc.stdlib cimport malloc, free
 DTYPE = np.float64
 ctypedef np.float64_t DTYPE_t
 
-IDTYPE = np.int32
-ctypedef np.int32_t IDTYPE_t
+IDTYPE = np.int64
+ctypedef np.int64_t IDTYPE_t
 
 
 cdef double compute_log_like(
@@ -168,56 +167,38 @@ def transit_periodogram_impl(
         np.ndarray[DTYPE_t, mode='c'] time_array,
         np.ndarray[DTYPE_t, mode='c'] flux_array,
         np.ndarray[DTYPE_t, mode='c'] flux_ivar_array,
-        np.ndarray[DTYPE_t, mode='c'] period_array,
-        np.ndarray[DTYPE_t, mode='c'] duration_array,
-        int oversample,
-        int use_likelihood=0):
+        np.ndarray[IDTYPE_t, mode='c'] duration_int_array,
 
-    cdef double bin_duration = np.min(duration_array) / oversample
-    cdef double* periods = <double*>period_array.data
-    cdef np.ndarray[IDTYPE_t] duration_int_array = \
-            np.asarray(duration_array / bin_duration, dtype=IDTYPE)
+        double period,
+        double bin_duration,
+        double sum_flux2,
+        double sum_flux,
+        double sum_ivar,
+
+        double eps,
+        double ninf,
+
+        int oversample,
+        int use_likelihood):
+
     cdef double* time = <double*>time_array.data
     cdef double* flux = <double*>flux_array.data
     cdef double* ivar = <double*>flux_ivar_array.data
     cdef int* durations = <int*>duration_int_array.data
     cdef int N = len(time_array)
-    cdef int n_durations = len(duration_array)
+    cdef int n_durations = len(duration_int_array)
 
-    cdef int p
-    cdef int P = len(period_array)
+    cdef double out_objective, out_depth, out_depth_std, out_phase, \
+                out_duration, out_depth_snr, out_log_like
 
-    cdef double sum_flux2 = np.sum(flux_array * flux_array * flux_ivar_array)
-    cdef double sum_flux = np.sum(flux_array * flux_ivar_array)
-    cdef double sum_ivar = np.sum(flux_ivar_array)
-
-    cdef np.ndarray[DTYPE_t] out_objective_array = np.empty(P, dtype=DTYPE)
-    cdef np.ndarray[DTYPE_t] out_depth_array     = np.empty(P, dtype=DTYPE)
-    cdef np.ndarray[DTYPE_t] out_depth_std_array = np.empty(P, dtype=DTYPE)
-    cdef np.ndarray[DTYPE_t] out_depth_snr_array = np.empty(P, dtype=DTYPE)
-    cdef np.ndarray[DTYPE_t] out_log_like_array  = np.empty(P, dtype=DTYPE)
-    cdef np.ndarray[DTYPE_t] out_phase_array     = np.empty(P, dtype=DTYPE)
-    cdef np.ndarray[DTYPE_t] out_duration_array  = np.empty(P, dtype=DTYPE)
-
-    cdef double* out_objective = <double*>out_objective_array.data
-    cdef double* out_depth     = <double*>out_depth_array.data
-    cdef double* out_depth_std = <double*>out_depth_std_array.data
-    cdef double* out_phase     = <double*>out_phase_array.data
-    cdef double* out_duration  = <double*>out_duration_array.data
-    cdef double* out_depth_snr = <double*>out_depth_snr_array.data
-    cdef double* out_log_like  = <double*>out_log_like_array.data
-
-    cdef double eps = np.finfo(DTYPE).eps
-    cdef double ninf = -np.inf
-
-    for p in prange(P, nogil=True):
+    with nogil:
         fold(N, time, flux, ivar, sum_flux2, sum_flux,
-             sum_ivar, ninf, eps, periods[p], n_durations, durations,
+             sum_ivar, ninf, eps, period, n_durations, durations,
              bin_duration, oversample, use_likelihood,
-             out_objective+p, out_depth+p, out_depth_std+p,
-             out_phase+p, out_duration+p,
-             out_depth_snr+p, out_log_like+p)
+             &out_objective, &out_depth, &out_depth_std,
+             &out_phase, &out_duration,
+             &out_depth_snr, &out_log_like)
 
-    return (out_objective_array, out_depth_array, out_depth_std_array,
-            out_phase_array, out_duration_array,
-            out_depth_snr_array, out_log_like_array)
+    return (out_objective, out_depth, out_depth_std,
+            out_phase, out_duration,
+            out_depth_snr, out_log_like)
