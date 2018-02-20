@@ -22,7 +22,66 @@ def strip_units(*arrs):
 
 
 class TransitPeriodogram(object):
-    """
+    """Compute the Transit Periodogram
+
+    This method is a commonly used tool for discovering transiting exoplanets
+    or eclipsing binaries in photometric time series datasets. This
+    implementation is based on the "box least squares (BLS)" method described
+    in [1]_ with added support for observational uncertainties,
+    parallelization, and a likelihood model.
+
+    Parameters
+    ----------
+    t : array-like or Quantity
+        Sequence of observation times
+    y : array-like or Quantity
+        Sequence of observations associated with times t
+    dy : float, array-like or Quantity, optional
+        Error or sequence of observational errors associated with times t
+
+    Examples
+    --------
+    Generate noisy data with a transit:
+
+    >>> rand = np.random.RandomState(42)
+    >>> t = rand.uniform(0, 10, 500)
+    >>> y = np.ones_like(t)
+    >>> y[np.abs((t + 1.0)%2.0-1)<0.08] = 1.0 - 0.1
+    >>> y += 0.01 * rand.randn(len(t))
+
+    Compute the transit periodogram on a heuristically determined period grid
+    and find the period with maximum power:
+
+    >>> model = TransitPeriodogram(t, y)
+    >>> results = model.autopower(0.16)
+    >>> results.period[np.argmax(results.power)]  # doctest: +FLOAT_CMP
+    2.005441310651872
+
+    Compute the periodogram on a user-specified period grid:
+
+    >>> periods = np.linspace(1.9, 2.1, 5)
+    >>> results = model.power(periods, 0.16)
+    >>> results.power  # doctest: +FLOAT_CMP
+    array([-0.142265  , -0.12027131, -0.02520321, -0.10649646, -0.13725468])
+
+    If the inputs are AstroPy Quantities with units, the units will be
+    validated and the outputs will also be Quantities with appropriate units:
+
+    >>> from astropy import units as u
+    >>> t = t * u.day
+    >>> y = y * u.dimensionless_unscaled
+    >>> model = TransitPeriodogram(t, y)
+    >>> results = model.autopower(0.16 * u.day)
+    >>> results.period.unit
+    Unit("d")
+    >>> results.power.unit
+    Unit(dimensionless)
+
+    References
+    ----------
+    .. [1] Kovacs, Zucker, & Mazeh (2002), A&A, 391, 369
+        (arXiv:astro-ph/0206099)
+
     """
 
     def __init__(self, t, y, dy=None):
