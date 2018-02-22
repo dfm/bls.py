@@ -5,20 +5,9 @@ __all__ = ["TransitPeriodogram"]
 import numpy as np
 
 from ... import units
+from ..lombscargle.core import has_units, strip_units
 
 from .methods import transit_periodogram_fast
-
-
-def has_units(obj):
-    return hasattr(obj, 'unit')
-
-
-def strip_units(*arrs):
-    strip = lambda a: None if a is None else np.asarray(a)  # NOQA
-    if len(arrs) == 1:
-        return strip(arrs[0])
-    else:
-        return map(strip, arrs)
 
 
 class TransitPeriodogram(object):
@@ -87,92 +76,6 @@ class TransitPeriodogram(object):
     def __init__(self, t, y, dy=None):
         self.t, self.y, self.dy = self._validate_inputs(t, y, dy)
 
-    def _validate_inputs(self, t, y, dy):
-        # Validate shapes of inputs
-        if dy is None:
-            t, y = np.broadcast_arrays(t, y, subok=True)
-        else:
-            t, y, dy = np.broadcast_arrays(t, y, dy, subok=True)
-        if t.ndim != 1:
-            raise ValueError("Inputs (t, y, dy) must be 1-dimensional")
-
-        # validate units of inputs if any is a Quantity
-        if any(has_units(arr) for arr in (t, y, dy)):
-            t, y = map(units.Quantity, (t, y))
-            if dy is not None:
-                dy = units.Quantity(dy)
-                try:
-                    dy = units.Quantity(dy, unit=y.unit)
-                except units.UnitConversionError:
-                    raise ValueError("Units of dy not equivalent "
-                                     "to units of y")
-        return t, y, dy
-
-    def _validate_duration(self, duration):
-        duration = np.atleast_1d(np.abs(duration))
-
-        if has_units(self.t):
-            duration = units.Quantity(duration)
-            try:
-                duration = units.Quantity(duration, unit=self.t.unit)
-            except units.UnitConversionError:
-                raise ValueError("Units of duration not equivalent to "
-                                 "units of t")
-        else:
-            if has_units(duration):
-                raise ValueError("duration have units while t doesn't.")
-
-        return duration
-
-    def _validate_period_and_duration(self, period, duration):
-        duration = self._validate_duration(duration)
-        period = np.atleast_1d(np.abs(period))
-
-        if has_units(self.t):
-            period = units.Quantity(period)
-            try:
-                period = units.Quantity(period, unit=self.t.unit)
-            except units.UnitConversionError:
-                raise ValueError("Units of period not equivalent to "
-                                 "units of t")
-        else:
-            if has_units(period):
-                raise ValueError("period have units while t doesn't.")
-
-        if not np.min(period) > np.max(duration):
-            raise ValueError("The maximum transit duration must be shorter "
-                             "than the minimum period")
-
-        return period, duration
-
-    def _format_results(self, method, period, results):
-        (power, depth, depth_err, transit_time, duration, depth_snr,
-         log_likelihood) = results
-
-        if has_units(self.t):
-            transit_time = units.Quantity(transit_time, unit=self.t.unit)
-            duration = units.Quantity(duration, unit=self.t.unit)
-
-        if has_units(self.y):
-            depth = units.Quantity(depth, unit=self.y.unit)
-            depth_err = units.Quantity(depth_err, unit=self.y.unit)
-
-            power = units.Quantity(power, unit=units.dimensionless_unscaled)
-            depth_snr = units.Quantity(depth_snr,
-                                       unit=units.dimensionless_unscaled)
-            log_likelihood = units.Quantity(log_likelihood,
-                                            unit=units.dimensionless_unscaled)
-
-        return TransitPeriodogramResults(method, period, power, depth,
-                                         depth_err, transit_time, duration,
-                                         depth_snr, log_likelihood)
-
-    def _time_unit(self):
-        if has_units(self.t):
-            return self.t.unit
-        else:
-            return 1
-
     def autoperiod(self, duration,
                    minimum_period=None, maximum_period=None,
                    minimum_n_transit=3, frequency_factor=1.0):
@@ -186,7 +89,7 @@ class TransitPeriodogram(object):
 
         Parameters
         ----------
-        duration : array-like or Quantity
+        duration : float, array-like or Quantity
             The set of durations that will be considered.
         minimum_period, maximum_period : float or Quantity, optional
             The minimum/maximum periods to search. If not provided, these will
@@ -291,6 +194,13 @@ class TransitPeriodogram(object):
     def autopower(self, duration, objective=None, method=None, oversample=10,
                   pool=None, minimum_n_transit=3, minimum_period=None,
                   maximum_period=None):
+        """Compute the periodogram at set of heuristically determined periods
+
+        This method calls :func:`TransitPeriodogram.autoperiod` to determine
+        the period grid and then :func:`TransitPeriodogram.power` to compute
+        the periodogram. See those methods for documentation of the arguments.
+
+        """
         period = self.autoperiod(duration,
                                  minimum_n_transit=minimum_n_transit,
                                  minimum_period=minimum_period,
@@ -306,7 +216,7 @@ class TransitPeriodogram(object):
         ----------
         period : array-like or Quantity
             The periods where the power should be computed
-        duration : array-like or Quantity
+        duration : float, array-like or Quantity
             The set of durations to test
         objective : {'likelihood', 'snr'}, optional
             The scalar that should be optimized to find the best fit phase,
@@ -393,7 +303,172 @@ class TransitPeriodogram(object):
             strip_units(duration), oversample,
             use_likelihood, pool)
 
-        return self._format_results(method, period, results)
+        return self._format_results(objective, period, results)
+
+    def _validate_inputs(self, t, y, dy):
+        """Private method used to check the consistency of the inputs
+
+        Parameters
+        ----------
+        t : array-like or Quantity
+            Sequence of observation times.
+        y : array-like or Quantity
+            Sequence of observations associated with times t.
+        dy : float, array-like or Quantity
+            Error or sequence of observational errors associated with times t.
+
+        Returns
+        -------
+        t, y, dy : array-like or Quantity
+            The inputs with consistent shapes and units.
+
+        Raises
+        ------
+        ValueError
+            If the dimensions are incompatible or if the units of dy cannot be
+            converted to the units of y.
+
+        """
+        # Validate shapes of inputs
+        if dy is None:
+            t, y = np.broadcast_arrays(t, y, subok=True)
+        else:
+            t, y, dy = np.broadcast_arrays(t, y, dy, subok=True)
+        if t.ndim != 1:
+            raise ValueError("Inputs (t, y, dy) must be 1-dimensional")
+
+        # validate units of inputs if any is a Quantity
+        if any(has_units(arr) for arr in (t, y, dy)):
+            t, y = map(units.Quantity, (t, y))
+            if dy is not None:
+                dy = units.Quantity(dy)
+                try:
+                    dy = units.Quantity(dy, unit=y.unit)
+                except units.UnitConversionError:
+                    raise ValueError("Units of dy not equivalent "
+                                     "to units of y")
+        return t, y, dy
+
+    def _validate_duration(self, duration):
+        """Private method used to check a set of test durations
+
+        Parameters
+        ----------
+        duration : float, array-like or Quantity
+            The set of durations that will be considered.
+
+        Returns
+        -------
+        duration : array-like or Quantity
+            The input reformatted with the correct shape and units.
+
+        Raises
+        ------
+        ValueError
+            If the units of duration cannot be converted to the units of t.
+
+        """
+        duration = np.atleast_1d(np.abs(duration))
+        if duration.ndim != 1:
+            raise ValueError("duration must be 1-dimensional")
+
+        if has_units(self.t):
+            duration = units.Quantity(duration)
+            try:
+                duration = units.Quantity(duration, unit=self.t.unit)
+            except units.UnitConversionError:
+                raise ValueError("Units of duration not equivalent to "
+                                 "units of t")
+        else:
+            if has_units(duration):
+                raise ValueError("duration have units while t doesn't.")
+
+        return duration
+
+    def _validate_period_and_duration(self, period, duration):
+        """Private method used to check a set of periods and durations
+
+        Parameters
+        ----------
+        period : float, array-like or Quantity
+            The set of test periods.
+        duration : float, array-like or Quantity
+            The set of durations that will be considered.
+
+        Returns
+        -------
+        period, duration : array-like or Quantity
+            The inputs reformatted with the correct shapes and units.
+
+        Raises
+        ------
+        ValueError
+            If the units of period or duration cannot be converted to the
+            units of t.
+
+        """
+        duration = self._validate_duration(duration)
+        period = np.atleast_1d(np.abs(period))
+        if period.ndim != 1:
+            raise ValueError("period must be 1-dimensional")
+
+        if has_units(self.t):
+            period = units.Quantity(period)
+            try:
+                period = units.Quantity(period, unit=self.t.unit)
+            except units.UnitConversionError:
+                raise ValueError("Units of period not equivalent to "
+                                 "units of t")
+        else:
+            if has_units(period):
+                raise ValueError("period have units while t doesn't.")
+
+        if not np.min(period) > np.max(duration):
+            raise ValueError("The maximum transit duration must be shorter "
+                             "than the minimum period")
+
+        return period, duration
+
+    def _format_results(self, objective, period, results):
+        """A private method used to wrap and add units to the periodogram
+
+        Parameters
+        ----------
+        objective : string
+            The name of the objective used in the optimization.
+        period : array-like or Quantity
+            The set of trial periods.
+        results : tuple
+            The output of one of the periodogram implementations.
+
+        """
+        (power, depth, depth_err, transit_time, duration, depth_snr,
+         log_likelihood) = results
+
+        if has_units(self.t):
+            transit_time = units.Quantity(transit_time, unit=self.t.unit)
+            duration = units.Quantity(duration, unit=self.t.unit)
+
+        if has_units(self.y):
+            depth = units.Quantity(depth, unit=self.y.unit)
+            depth_err = units.Quantity(depth_err, unit=self.y.unit)
+
+            power = units.Quantity(power, unit=units.dimensionless_unscaled)
+            depth_snr = units.Quantity(depth_snr,
+                                       unit=units.dimensionless_unscaled)
+            log_likelihood = units.Quantity(log_likelihood,
+                                            unit=units.dimensionless_unscaled)
+
+        return TransitPeriodogramResults(objective, period, power, depth,
+                                         depth_err, transit_time, duration,
+                                         depth_snr, log_likelihood)
+
+    def _time_unit(self):
+        """Get the time units for this model"""
+        if has_units(self.t):
+            return self.t.unit
+        else:
+            return 1
 
 
 class TransitPeriodogramResults(dict):
@@ -401,13 +476,39 @@ class TransitPeriodogramResults(dict):
 
     Attributes
     ----------
-
+    objective : string
+        The scalar used to optimize to find the best fit phase, duration, and
+        depth. See :func:`TransitPeriodogram.power` for more information.
+    period : array-like or Quantity
+        The set of test periods.
+    power : array-like or Quantity
+        The periodogram evaluated at the periods in ``period``. If
+        ``objective`` is:
+        * ``'likelihood'``: the values of ``power`` are the
+          log likelihood maximized over phase, depth, and duration, or
+        * ``'snr'``: the values of ``power`` are the signal-to-noise with
+          which the depth is measured maximized over phase, depth, and
+          duration.
+    depth : array-like or Quantity
+        The estimated depth of the maximum power model at each period.
+    depth_err : array-like or Quantity
+        The 1-sigma uncertainty on ``depth``.
+    transit_time : array-like or Quantity
+        The maximum power phase of the transit in units of time. This
+        indicates the mid-transit time and it will always be in the range
+        (0, period).
+    duration : array-like or Quantity
+        The maximum power duration at each period.
+    depth_snr : array-like or Quantity
+        The signal-to-noise with which the depth is measured at maximum power.
+    log_likelihood : array-like or Quantity
+        The log likelihood of the maximum power model.
 
     """
     def __init__(self, *args):
         super(TransitPeriodogramResults, self).__init__(zip(
-            ("method", "period", "power", "depth", "depth_err", "transit_time",
-             "duration", "depth_snr", "log_likelihood"),
+            ("objective", "period", "power", "depth", "depth_err",
+             "transit_time", "duration", "depth_snr", "log_likelihood"),
             args
         ))
 
