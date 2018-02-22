@@ -1,13 +1,23 @@
 # -*- coding: utf-8 -*-
 
-__all__ = ["TransitPeriodogram"]
+__all__ = ["TransitPeriodogram", "TransitPeriodogramResults"]
 
 import numpy as np
 
 from ... import units
 from ..lombscargle.core import has_units, strip_units
 
-from .methods import transit_periodogram_fast
+from . import methods
+
+
+def validate_unit_consistency(reference_object, input_object):
+    if has_units(reference_object):
+        input_object = units.Quantity(input_object, unit=reference_object.unit)
+    else:
+        if has_units(input_object):
+            input_object = units.Quantity(input_object, unit=units.one)
+            input_object = input_object.value
+    return input_object
 
 
 class TransitPeriodogram(object):
@@ -22,11 +32,11 @@ class TransitPeriodogram(object):
     Parameters
     ----------
     t : array-like or Quantity
-        Sequence of observation times
+        Sequence of observation times.
     y : array-like or Quantity
-        Sequence of observations associated with times t
+        Sequence of observations associated with times ``t``.
     dy : float, array-like or Quantity, optional
-        Error or sequence of observational errors associated with times t
+        Error or sequence of observational errors associated with times ``t``.
 
     Examples
     --------
@@ -189,7 +199,7 @@ class TransitPeriodogram(object):
 
         # Compute the number of frequencies and the frequency grid
         nf = 1 + int(np.round((maximum_frequency - minimum_frequency)/df))
-        return 1.0/(maximum_frequency-df*np.arange(nf)) * self._time_unit()
+        return 1.0/(maximum_frequency-df*np.arange(nf)) * self._t_unit()
 
     def autopower(self, duration, objective=None, method=None, oversample=10,
                   pool=None, minimum_n_transit=3, minimum_period=None,
@@ -224,18 +234,21 @@ class TransitPeriodogram(object):
             to optimize the log-likelihood of the model, or ``'snr'`` to
             optimize the signal-to-noise with which the transit depth is
             measured.
-        method : {'fast', 'fast_python', 'slow'}, optional
+        method : {'fast', 'slow'}, optional
             The computational method used to compute the periodogram. This is
             mainly included for the purposes of testing and most users will
             want to use the optimized ``'fast'`` method (default) that is
-            implemented in Cython. The ``'fast_python'`` method is an
-            implementation of the ``'fast'`` method in pure Python and
-            ``'slow'`` is a brute-force method that is used to test the
-            results of the other methods.
+            implemented in Cython.  ``'slow'`` is a brute-force method that is
+            used to test the results of the ``'fast'`` method.
         oversample : int, optional
             The number of bins per duration that should be used. This sets the
             time resolution of the phase fit with larger values of
             ``oversample`` yielding a finer grid and higher computational cost.
+        pool : optional
+            If provided, this should be an object with a ``map`` method that
+            will be used to parallelize the computation. For example, this can
+            be a :class:`multiprocessing.Pool` or a
+            :class:`multiprocessing.pool.ThreadPool`.
 
         Returns
         -------
@@ -274,36 +287,89 @@ class TransitPeriodogram(object):
         # Select the computational method
         if method is None:
             method = "fast"
-        allowed_methods = ["fast", "fast_python", "slow"]
+        allowed_methods = ["fast", "slow"]
         if method not in allowed_methods:
             raise ValueError(("Unrecognized method '{0}'\n"
                               "allowed methods are: {1}")
                              .format(method, allowed_methods))
 
         # Format and check the input arrays
-        time = np.ascontiguousarray(strip_units(self.t), dtype=np.float64)
-        flux = np.ascontiguousarray(strip_units(self.y), dtype=np.float64)
+        t = np.ascontiguousarray(strip_units(self.t), dtype=np.float64)
+        y = np.ascontiguousarray(strip_units(self.y), dtype=np.float64)
         if self.dy is None:
-            flux_ivar = np.ones_like(flux)
+            ivar = np.ones_like(y)
         else:
-            flux_ivar = 1.0 / np.ascontiguousarray(strip_units(self.dy),
-                                                   dtype=np.float64)**2
+            ivar = 1.0 / np.ascontiguousarray(strip_units(self.dy),
+                                              dtype=np.float64)**2
+
+        # Make sure that the period and duration arrays are C-order
+        period_fmt = np.ascontiguousarray(strip_units(period),
+                                          dtype=np.float64)
+        duration = np.ascontiguousarray(strip_units(duration),
+                                        dtype=np.float64)
 
         # Select the correct implementation for the chosen method
         if method == "fast":
-            transit_periodogram = transit_periodogram_fast
-        elif method == "fast_python":
-            assert 0
+            transit_periodogram = methods.transit_periodogram_fast
         else:
-            assert 0
+            transit_periodogram = methods.transit_periodogram_slow
 
         # Run the implementation
         results = transit_periodogram(
-            time, flux - np.median(flux), flux_ivar, strip_units(period),
-            strip_units(duration), oversample,
-            use_likelihood, pool)
+            t, y - np.median(y), ivar, period_fmt, duration,
+            oversample, use_likelihood, pool)
 
         return self._format_results(objective, period, results)
+
+    def model(self, t_model, period, duration, transit_time):
+        """Compute the transit model at the given period, duration, and phase
+
+        Parameters
+        ----------
+        t_model : array-like or Quantity
+            Times at which to compute the model.
+        period : float or Quantity
+            The period of the transits.
+        duration : float or Quantity
+            The duration of the transit.
+        transit_time : float or Quantity
+            The mid-transit time of a reference transit.
+
+        Returns
+        -------
+        y_model : array-like or Quantity
+            The model evaluated at the times ``t_model`` with units of ``y``.
+
+        """
+        period, duration = self._validate_period_and_duration(period, duration)
+        transit_time = validate_unit_consistency(self.t, transit_time)
+        t_model = strip_units(validate_unit_consistency(self.t, t_model))
+
+        period = float(strip_units(period))
+        duration = float(strip_units(duration))
+        transit_time = float(strip_units(transit_time))
+
+        t = np.ascontiguousarray(strip_units(self.t), dtype=np.float64)
+        y = np.ascontiguousarray(strip_units(self.y), dtype=np.float64)
+        if self.dy is None:
+            ivar = np.ones_like(y)
+        else:
+            ivar = 1.0 / np.ascontiguousarray(strip_units(self.dy),
+                                              dtype=np.float64)**2
+
+        # Compute the depth
+        hp = 0.5*period
+        m_in = np.abs((t-transit_time+hp) % period - hp) < 0.5*duration
+        m_out = ~m_in
+        y_in = np.sum(y[m_in] * ivar[m_in]) / np.sum(ivar[m_in])
+        y_out = np.sum(y[m_out] * ivar[m_out]) / np.sum(ivar[m_out])
+
+        # Evaluate the model
+        y_model = y_out + np.zeros_like(t_model)
+        m_model = np.abs((t_model-transit_time+hp) % period-hp) < 0.5*duration
+        y_model[m_model] = y_in
+
+        return y_model * self._y_unit()
 
     def _validate_inputs(self, t, y, dy):
         """Private method used to check the consistency of the inputs
@@ -340,13 +406,8 @@ class TransitPeriodogram(object):
         # validate units of inputs if any is a Quantity
         if any(has_units(arr) for arr in (t, y, dy)):
             t, y = map(units.Quantity, (t, y))
-            if dy is not None:
-                dy = units.Quantity(dy)
-                try:
-                    dy = units.Quantity(dy, unit=y.unit)
-                except units.UnitConversionError:
-                    raise ValueError("Units of dy not equivalent "
-                                     "to units of y")
+            dy = validate_unit_consistency(t, dy)
+
         return t, y, dy
 
     def _validate_duration(self, duration):
@@ -371,19 +432,7 @@ class TransitPeriodogram(object):
         duration = np.atleast_1d(np.abs(duration))
         if duration.ndim != 1:
             raise ValueError("duration must be 1-dimensional")
-
-        if has_units(self.t):
-            duration = units.Quantity(duration)
-            try:
-                duration = units.Quantity(duration, unit=self.t.unit)
-            except units.UnitConversionError:
-                raise ValueError("Units of duration not equivalent to "
-                                 "units of t")
-        else:
-            if has_units(duration):
-                raise ValueError("duration have units while t doesn't.")
-
-        return duration
+        return validate_unit_consistency(self.t, duration)
 
     def _validate_period_and_duration(self, period, duration):
         """Private method used to check a set of periods and durations
@@ -411,17 +460,7 @@ class TransitPeriodogram(object):
         period = np.atleast_1d(np.abs(period))
         if period.ndim != 1:
             raise ValueError("period must be 1-dimensional")
-
-        if has_units(self.t):
-            period = units.Quantity(period)
-            try:
-                period = units.Quantity(period, unit=self.t.unit)
-            except units.UnitConversionError:
-                raise ValueError("Units of period not equivalent to "
-                                 "units of t")
-        else:
-            if has_units(period):
-                raise ValueError("period have units while t doesn't.")
+        period = validate_unit_consistency(self.t, period)
 
         if not np.min(period) > np.max(duration):
             raise ValueError("The maximum transit duration must be shorter "
@@ -463,10 +502,15 @@ class TransitPeriodogram(object):
                                          depth_err, transit_time, duration,
                                          depth_snr, log_likelihood)
 
-    def _time_unit(self):
-        """Get the time units for this model"""
+    def _t_unit(self):
         if has_units(self.t):
             return self.t.unit
+        else:
+            return 1
+
+    def _y_unit(self):
+        if has_units(self.y):
+            return self.y.unit
         else:
             return 1
 
@@ -531,3 +575,17 @@ class TransitPeriodogramResults(dict):
 
     def __dir__(self):
         return list(self.keys())
+
+    def assertallclose(self, other):
+        for k, v in self.items():
+            if k not in other:
+                raise AssertionError("missing key '{0}'".format(k))
+            if k == "objective":
+                assert v == other[k], (
+                    "Mismatched objectives. Expected '{0}', got '{1}'"
+                    .format(v, other[k])
+                )
+                continue
+            np.testing.assert_allclose(v, other[k],
+                                       err_msg="Mismatch in attribute '{0}'"
+                                       .format(k))
