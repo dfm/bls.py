@@ -14,12 +14,12 @@ ctypedef np.int64_t IDTYPE_t
 
 
 cdef double compute_log_like(
-        double y_in,
-        double y_out,
-        double ivar_in,
-        double sum_y2,
-        double sum_y,
-        double sum_ivar,
+    double y_in,
+    double y_out,
+    double ivar_in,
+    double sum_y2,
+    double sum_y,
+    double sum_ivar,
 ) nogil:
     cdef double arg = y_in - y_out
     cdef double chi2 = sum_y2 - 2*y_out*sum_y
@@ -59,9 +59,9 @@ cdef void fold(
     double* best_objective,  # The value of the periodogram at maximum
     double* best_depth,      # The estimated depth at maximum
     double* best_depth_std,  # The uncertainty on ``best_depth``
+    double* best_duration,   # The best fitting duration in units of ``t``
     double* best_phase,      # The phase of the mid-transit time in units of
                              # ``t``
-    double* best_duration,   # The best fitting duration in units of ``t``
     double* best_depth_snr,  # The signal-to-noise ratio of the depth estimate
     double* best_log_like    # The log likelihood at maximum
 ) nogil:
@@ -156,9 +156,9 @@ cdef void fold(
                 best_depth_std[0] = depth_std
                 best_depth_snr[0] = depth_snr
                 best_log_like[0] = log_like
+                best_duration[0] = durations[k] * bin_duration
                 best_phase[0] = (n*bin_duration +
                                  0.5*durations[k]*bin_duration) % period
-                best_duration[0] = durations[k] * bin_duration
 
     # Clean up the temporary memory
     free(mean_y)
@@ -198,14 +198,17 @@ def transit_periodogram_impl(
                 out_phase = 0.0, out_duration = 0.0, out_depth_snr = 0.0, \
                 out_log_like = 0.0
 
+    # By wrapping this in `nogil`, we make it possible to use a ThreadPool
+    # with shared memory instead of a multiprocessing.Pool. This can lead to
+    # better performance in some cases.
     with nogil:
         fold(N, t, y, ivar, sum_y2, sum_y,
              sum_ivar, ninf, eps, period, n_durations, durations,
              bin_duration, oversample, use_likelihood,
              &out_objective, &out_depth, &out_depth_std,
-             &out_phase, &out_duration,
+             &out_duration, &out_phase,
              &out_depth_snr, &out_log_like)
 
     return (out_objective, out_depth, out_depth_std,
-            out_phase, out_duration,
+            out_duration, out_phase,
             out_depth_snr, out_log_like)

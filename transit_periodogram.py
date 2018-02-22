@@ -4,6 +4,7 @@ __all__ = ["TransitPeriodogram", "TransitPeriodogramResults"]
 
 import numpy as np
 
+from ...tests.helper import assert_quantity_allclose
 from ... import units
 from ..lombscargle.core import has_units, strip_units
 
@@ -162,36 +163,19 @@ class TransitPeriodogram(object):
         if minimum_period is None:
             minimum_period = 2.0 * strip_units(np.max(duration))
         else:
-            if has_units(self.t):
-                minimum_period = units.Quantity(minimum_period)
-                try:
-                    minimum_period = units.Quantity(minimum_period,
-                                                    unit=self.t.unit)
-                except units.UnitConversionError:
-                    raise ValueError("Units of minimum_period not equivalent "
-                                     "to units of t")
-            else:
-                if has_units(minimum_period):
-                    raise ValueError("minimum_period has units while t "
-                                     "doesn't.")
+            minimum_period = validate_unit_consistency(self.t, minimum_period)
+            minimum_period = strip_units(minimum_period)
 
         # If no maximum period is provided, choose one by requiring that
         # all signals with at least minimum_n_transit should be detectable.
         if maximum_period is None:
             maximum_period = baseline / minimum_n_transit
         else:
-            if has_units(self.t):
-                maximum_period = units.Quantity(maximum_period)
-                try:
-                    maximum_period = units.Quantity(maximum_period,
-                                                    unit=self.t.unit)
-                except units.UnitConversionError:
-                    raise ValueError("Units of maximum_period not equivalent "
-                                     "to units of t")
-            else:
-                if has_units(maximum_period):
-                    raise ValueError("maximum_period has units while t "
-                                     "doesn't.")
+            maximum_period = validate_unit_consistency(self.t, maximum_period)
+            maximum_period = strip_units(maximum_period)
+
+        if maximum_period < minimum_period:
+            minimum_period, maximum_period = maximum_period, minimum_period
 
         # Convert bounds to frequency
         minimum_frequency = 1.0/strip_units(maximum_period)
@@ -404,9 +388,8 @@ class TransitPeriodogram(object):
             raise ValueError("Inputs (t, y, dy) must be 1-dimensional")
 
         # validate units of inputs if any is a Quantity
-        if any(has_units(arr) for arr in (t, y, dy)):
-            t, y = map(units.Quantity, (t, y))
-            dy = validate_unit_consistency(t, dy)
+        if dy is not None:
+            dy = validate_unit_consistency(y, dy)
 
         return t, y, dy
 
@@ -430,7 +413,7 @@ class TransitPeriodogram(object):
 
         """
         duration = np.atleast_1d(np.abs(duration))
-        if duration.ndim != 1:
+        if duration.ndim != 1 or duration.size == 0:
             raise ValueError("duration must be 1-dimensional")
         return validate_unit_consistency(self.t, duration)
 
@@ -458,7 +441,7 @@ class TransitPeriodogram(object):
         """
         duration = self._validate_duration(duration)
         period = np.atleast_1d(np.abs(period))
-        if period.ndim != 1:
+        if period.ndim != 1 or period.size == 0:
             raise ValueError("period must be 1-dimensional")
         period = validate_unit_consistency(self.t, period)
 
@@ -492,11 +475,18 @@ class TransitPeriodogram(object):
             depth = units.Quantity(depth, unit=self.y.unit)
             depth_err = units.Quantity(depth_err, unit=self.y.unit)
 
-            power = units.Quantity(power, unit=units.dimensionless_unscaled)
-            depth_snr = units.Quantity(depth_snr,
-                                       unit=units.dimensionless_unscaled)
-            log_likelihood = units.Quantity(log_likelihood,
-                                            unit=units.dimensionless_unscaled)
+            depth_snr = units.Quantity(depth_snr, unit=units.one)
+
+            if self.dy is None:
+                if objective == "likelihood":
+                    power = units.Quantity(power, unit=self.y.unit**2)
+                else:
+                    power = units.Quantity(power, unit=units.one)
+                log_likelihood = units.Quantity(log_likelihood,
+                                                unit=self.y.unit**2)
+            else:
+                power = units.Quantity(power, unit=units.one)
+                log_likelihood = units.Quantity(log_likelihood, unit=units.one)
 
         return TransitPeriodogramResults(objective, period, power, depth,
                                          depth_err, transit_time, duration,
@@ -537,12 +527,12 @@ class TransitPeriodogramResults(dict):
         The estimated depth of the maximum power model at each period.
     depth_err : array-like or Quantity
         The 1-sigma uncertainty on ``depth``.
+    duration : array-like or Quantity
+        The maximum power duration at each period.
     transit_time : array-like or Quantity
         The maximum power phase of the transit in units of time. This
         indicates the mid-transit time and it will always be in the range
         (0, period).
-    duration : array-like or Quantity
-        The maximum power duration at each period.
     depth_snr : array-like or Quantity
         The signal-to-noise with which the depth is measured at maximum power.
     log_likelihood : array-like or Quantity
@@ -552,7 +542,7 @@ class TransitPeriodogramResults(dict):
     def __init__(self, *args):
         super(TransitPeriodogramResults, self).__init__(zip(
             ("objective", "period", "power", "depth", "depth_err",
-             "transit_time", "duration", "depth_snr", "log_likelihood"),
+             "duration", "transit_time", "depth_snr", "log_likelihood"),
             args
         ))
 
@@ -576,7 +566,7 @@ class TransitPeriodogramResults(dict):
     def __dir__(self):
         return list(self.keys())
 
-    def assertallclose(self, other):
+    def assert_allclose(self, other):
         for k, v in self.items():
             if k not in other:
                 raise AssertionError("missing key '{0}'".format(k))
@@ -586,6 +576,6 @@ class TransitPeriodogramResults(dict):
                     .format(v, other[k])
                 )
                 continue
-            np.testing.assert_allclose(v, other[k],
-                                       err_msg="Mismatch in attribute '{0}'"
-                                       .format(k))
+            assert_quantity_allclose(v, other[k],
+                                     err_msg="Mismatch in attribute '{0}'"
+                                     .format(k))

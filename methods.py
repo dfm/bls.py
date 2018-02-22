@@ -38,12 +38,12 @@ def transit_periodogram_slow(t, y, ivar, period, duration,
         The estimated depth of the maximum power model at each period.
     depth_err : array-like
         The 1-sigma uncertainty on ``depth``.
+    duration : array-like
+        The maximum power duration at each period.
     transit_time : array-like
         The maximum power phase of the transit in units of time. This
         indicates the mid-transit time and it will always be in the range
         (0, period).
-    duration : array-like
-        The maximum power duration at each period.
     depth_snr : array-like
         The signal-to-noise with which the depth is measured at maximum power.
     log_likelihood : array-like
@@ -85,12 +85,12 @@ def transit_periodogram_fast(t, y, ivar, period, duration, oversample,
         The estimated depth of the maximum power model at each period.
     depth_err : array-like
         The 1-sigma uncertainty on ``depth``.
+    duration : array-like
+        The maximum power duration at each period.
     transit_time : array-like
         The maximum power phase of the transit in units of time. This
         indicates the mid-transit time and it will always be in the range
         (0, period).
-    duration : array-like
-        The maximum power duration at each period.
     depth_snr : array-like
         The signal-to-noise with which the depth is measured at maximum power.
     log_likelihood : array-like
@@ -165,7 +165,7 @@ def _transit_periodogram_slow_one(t, y, ivar, duration, oversample,
             if objective > best[0]:
                 best = (
                     objective,
-                    (objective, depth, depth_err, t0, dur, snr, loglike)
+                    (objective, depth, depth_err, dur, t0, snr, loglike)
                 )
 
     return best[1]
