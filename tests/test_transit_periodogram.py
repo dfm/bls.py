@@ -103,60 +103,56 @@ def test_period_units(data):
 
 
 @pytest.mark.parametrize("method", ["fast", "slow"])
-def test_results_units(data, method):
+@pytest.mark.parametrize("with_err", [True, False])
+@pytest.mark.parametrize("t_unit", [None, units.day])
+@pytest.mark.parametrize("y_unit", [None, units.mag])
+@pytest.mark.parametrize("objective", ["likelihood", "snr"])
+def test_results_units(data, method, with_err, t_unit, y_unit, objective):
     t, y, dy, params = data
-    t_unit = units.day
-    y_unit = units.mag
 
     periods = np.linspace(params["period"]-1.0, params["period"]+1.0, 3)
 
-    model = TransitPeriodogram(t * t_unit, y * y_unit, dy)
-    results = model.power(periods, params["duration"], method=method)
-    assert results.period.unit == t_unit
-    assert results.power.unit == units.one
-    assert results.depth.unit == y_unit
-    assert results.depth_err.unit == y_unit
-    assert results.transit_time.unit == t_unit
-    assert results.duration.unit == t_unit
-    assert results.depth_snr.unit == units.one
-    assert results.log_likelihood.unit == units.one
+    if t_unit is not None:
+        t *= t_unit
+    if y_unit is not None:
+        y *= y_unit
+        dy *= y_unit
+    if not with_err:
+        dy = None
 
-    model = TransitPeriodogram(t * t_unit, y, dy)
-    results = model.power(periods, params["duration"], method=method)
-    assert results.period.unit == t_unit
-    assert not has_units(results.power)
-    assert not has_units(results.depth)
-    assert not has_units(results.depth_err)
-    assert results.transit_time.unit == t_unit
-    assert results.duration.unit == t_unit
-    assert not has_units(results.depth_snr)
-    assert not has_units(results.log_likelihood)
+    model = TransitPeriodogram(t, y, dy)
+    results = model.power(periods, params["duration"], method=method,
+                          objective=objective)
 
-    model = TransitPeriodogram(t, y * y_unit, dy)
-    results = model.power(periods, params["duration"])
-    assert not has_units(results.period)
-    assert results.power.unit == units.one
-    assert results.depth.unit == y_unit
-    assert results.depth_err.unit == y_unit
-    assert not has_units(results.transit_time)
-    assert not has_units(results.duration)
-    assert results.depth_snr.unit == units.one
-    assert results.log_likelihood.unit == units.one
+    if t_unit is None:
+        assert not has_units(results.period)
+        assert not has_units(results.duration)
+        assert not has_units(results.transit_time)
+    else:
+        assert results.period.unit == t_unit
+        assert results.duration.unit == t_unit
+        assert results.transit_time.unit == t_unit
 
-    model = TransitPeriodogram(t * t_unit, y * y_unit)
-    results = model.power(periods, params["duration"], method=method)
-    assert results.period.unit == t_unit
-    assert results.power.unit == y_unit * y_unit
-    assert results.depth.unit == y_unit
-    assert results.depth_err.unit == y_unit
-    assert results.transit_time.unit == t_unit
-    assert results.duration.unit == t_unit
-    assert results.depth_snr.unit == units.one
-    assert results.log_likelihood.unit == y_unit * y_unit
+    if y_unit is None:
+        assert not has_units(results.power)
+        assert not has_units(results.depth)
+        assert not has_units(results.depth_err)
+        assert not has_units(results.depth_snr)
+        assert not has_units(results.log_likelihood)
+    else:
+        assert results.depth.unit == y_unit
+        assert results.depth_err.unit == y_unit
+        assert results.depth_snr.unit == units.one
 
-    results = model.power(periods, params["duration"], objective="snr",
-                          method=method)
-    assert results.power.unit == units.one
+        if dy is None:
+            assert results.log_likelihood.unit == y_unit * y_unit
+            if objective == "snr":
+                assert results.power.unit == units.one
+            else:
+                assert results.power.unit == y_unit * y_unit
+        else:
+            assert results.log_likelihood.unit == units.one
+            assert results.power.unit == units.one
 
 
 def test_autopower(data):
