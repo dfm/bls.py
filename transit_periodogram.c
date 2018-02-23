@@ -38,9 +38,6 @@ int fold (
     double* y,               // The y measured at ``t``
     double* ivar,            // The inverse variance of the y array
 
-    /*double sum_y2,           // The precomputed value of sum(y^2 * ivar)*/
-    /*double sum_y,            // The precomputed value of sum(y * ivar)*/
-    /*double sum_ivar,         // The precomputed value of sum(ivar)*/
     double ninf,             // Negative infinity for DTYPE
     double eps,              // Machine precision for DTYPE
 
