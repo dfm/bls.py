@@ -1,4 +1,5 @@
 #include <math.h>
+#include <float.h>
 #include <stdlib.h>
 
 void compute_objective(
@@ -13,7 +14,7 @@ void compute_objective(
     double* objective,
     double* log_likelihood,
     double* depth,
-    double* depth_std,
+    double* depth_err,
     double* depth_snr
 ) {
     if (obj_flag) {
@@ -25,21 +26,18 @@ void compute_objective(
         *objective = *log_likelihood;
     } else {
         *depth = y_out - y_in;
-        *depth_std = sqrt(1.0 / ivar_in + 1.0 / ivar_out);
-        *depth_snr = *depth / *depth_std;
+        *depth_err = sqrt(1.0 / ivar_in + 1.0 / ivar_out);
+        *depth_snr = *depth / *depth_err;
         *objective = *depth_snr;
     }
 }
 
-int fold (
+int fold_all (
     // Inputs
     int N,                   // Length of the time array
     double* t,               // The list of timestamps
     double* y,               // The y measured at ``t``
     double* ivar,            // The inverse variance of the y array
-
-    double ninf,             // Negative infinity for DTYPE
-    double eps,              // Machine precision for DTYPE
 
     int n_periods,
     double* periods,         // The period to test in units of ``t``
@@ -48,18 +46,14 @@ int fold (
     double* durations,       // The durations to test in units of ``bin_duration``
     int oversample,          // The number of ``bin_duration`` bins in the maximum duration
 
-    int obj_flag,      // A flag indicating the periodogram type
+    int obj_flag,            // A flag indicating the periodogram type
                              // 0 - depth signal-to-noise
                              // 1 - log likelihood
-
-    // Work arrays - must be at least n_bins_max+1 each
-    /*double* mean_y,*/
-    /*double* mean_ivar,*/
 
     // Outputs
     double* best_objective,  // The value of the periodogram at maximum
     double* best_depth,      // The estimated depth at maximum
-    double* best_depth_std,  // The uncertainty on ``best_depth``
+    double* best_depth_err,  // The uncertainty on ``best_depth``
     double* best_duration,   // The best fitting duration in units of ``t``
     double* best_phase,      // The phase of the mid-transit time in units of
                              // ``t``
@@ -67,7 +61,7 @@ int fold (
     double* best_log_like    // The log likelihood at maximum
 ) {
     int ind, n, k, p, n_max, dur, n_bins;
-    double period, y_in, y_out, ivar_in, ivar_out, depth, depth_std, depth_snr, log_like, objective;
+    double period, y_in, y_out, ivar_in, ivar_out, depth, depth_err, depth_snr, log_like, objective;
 
     // Start by finding the period and duration ranges
     double max_period = periods[0], min_period = periods[0];
@@ -75,13 +69,13 @@ int fold (
         if (periods[k] < min_period) min_period = periods[k];
         if (periods[k] > max_period) max_period = periods[k];
     }
-    if (min_period < eps) return 1;
+    if (min_period < DBL_EPSILON) return 1;
     double min_duration = durations[0], max_duration = durations[0];
     for (k = 1; k < n_durations; ++k) {
         if (durations[k] < min_duration) min_duration = durations[k];
         if (durations[k] > max_duration) max_duration = durations[k];
     }
-    if ((max_duration > min_period) || (min_duration < eps)) return 2;
+    if ((max_duration > min_period) || (min_duration < DBL_EPSILON)) return 2;
 
     // Compute the durations in terms of bin_duration
     double bin_duration = min_duration / ((double)oversample);
@@ -153,9 +147,9 @@ int fold (
         // Then we loop over phases (in steps of n_bin) and durations and find the
         // best fit value. By looping over durations here, we get to reuse a lot of
         // the computations that we did above.
-        best_objective[p] = ninf;
+        best_objective[p] = -INFINITY;
         for (k = 0; k < n_durations; ++k) {
-            dur = durations[k];
+            dur = durations_index[k];
             n_max = n_bins-dur;
             for (n = 0; n <= n_max; ++n) {
                 // Estimate the in-transit and out-of-transit flux
@@ -165,7 +159,7 @@ int fold (
                 ivar_out = sum_ivar - ivar_in;
 
                 // Skip this model if there are no points in transit
-                if ((ivar_in < eps) || (ivar_out < eps)) {
+                if ((ivar_in < DBL_EPSILON) || (ivar_out < DBL_EPSILON)) {
                     continue;
                 }
 
@@ -176,7 +170,7 @@ int fold (
                 // Either compute the log likelihood or the signal-to-noise
                 // ratio
                 compute_objective(y_in, y_out, ivar_in, ivar_out, sum_y2, sum_y, sum_ivar, obj_flag,
-                        &objective, &log_like, &depth, &depth_std, &depth_snr);
+                        &objective, &log_like, &depth, &depth_err, &depth_snr);
 
                 // If this is the best result seen so far, keep it
                 if (objective > best_objective[p]) {
@@ -184,10 +178,10 @@ int fold (
 
                     // Compute the other parameters
                     compute_objective(y_in, y_out, ivar_in, ivar_out, sum_y2, sum_y, sum_ivar, (obj_flag == 0),
-                            &objective, &log_like, &depth, &depth_std, &depth_snr);
+                            &objective, &log_like, &depth, &depth_err, &depth_snr);
 
                     best_depth[p]     = depth;
-                    best_depth_std[p] = depth_std;
+                    best_depth_err[p] = depth_err;
                     best_depth_snr[p] = depth_snr;
                     best_log_like[p]  = log_like;
                     best_duration[p]  = durations_index[k] * bin_duration;

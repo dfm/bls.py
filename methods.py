@@ -5,7 +5,7 @@ __all__ = ["transit_periodogram_fast"]
 import numpy as np
 from functools import partial
 
-from .transit_periodogram_impl import transit_periodogram_impl
+from .transit_periodogram_impl import transit_periodogram_impl, transit_periodogram_impl_all
 
 
 def transit_periodogram_slow(t, y, ivar, period, duration,
@@ -97,6 +97,10 @@ def transit_periodogram_fast(t, y, ivar, period, duration, oversample,
         The log likelihood of the maximum power model.
 
     """
+    return transit_periodogram_impl_all(
+        t, y, ivar, period, duration, oversample, use_likelihood
+    )
+
     # Pre-compute some factors that are used in every loop
     sum_y2 = np.sum(y * y * ivar)
     sum_y = np.sum(y * ivar)
