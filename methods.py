@@ -5,11 +5,11 @@ __all__ = ["transit_periodogram_fast"]
 import numpy as np
 from functools import partial
 
-from .transit_periodogram_impl import transit_periodogram_impl, transit_periodogram_impl_all
+from ._impl import transit_periodogram_impl
 
 
 def transit_periodogram_slow(t, y, ivar, period, duration,
-                             oversample, use_likelihood, pool):
+                             oversample, use_likelihood):
     """Compute the periodogram using a brute force reference method
 
     t : array-like
@@ -26,9 +26,6 @@ def transit_periodogram_slow(t, y, ivar, period, duration,
         The resolution of the phase grid in units of durations.
     use_likeliood : bool
         If true, maximize the log likelihood over phase, duration, and depth.
-    pool :
-        If provided, this should be an object with a ``map`` method that will
-        be used to parallelize the computation.
 
     Returns
     -------
@@ -52,11 +49,11 @@ def transit_periodogram_slow(t, y, ivar, period, duration,
     """
     f = partial(_transit_periodogram_slow_one, t, y, ivar, duration,
                 oversample, use_likelihood)
-    return _apply(f, pool, period)
+    return _apply(f, period)
 
 
 def transit_periodogram_fast(t, y, ivar, period, duration, oversample,
-                             use_likelihood, pool):
+                             use_likelihood):
     """Compute the periodogram using an optimized Cython implementation
 
     t : array-like
@@ -73,9 +70,6 @@ def transit_periodogram_fast(t, y, ivar, period, duration, oversample,
         The resolution of the phase grid in units of durations.
     use_likeliood : bool
         If true, maximize the log likelihood over phase, duration, and depth.
-    pool :
-        If provided, this should be an object with a ``map`` method that will
-        be used to parallelize the computation.
 
     Returns
     -------
@@ -97,34 +91,9 @@ def transit_periodogram_fast(t, y, ivar, period, duration, oversample,
         The log likelihood of the maximum power model.
 
     """
-    return transit_periodogram_impl_all(
+    return transit_periodogram_impl(
         t, y, ivar, period, duration, oversample, use_likelihood
     )
-
-    # Pre-compute some factors that are used in every loop
-    sum_y2 = np.sum(y * y * ivar)
-    sum_y = np.sum(y * ivar)
-    sum_ivar = np.sum(ivar)
-
-    # Convert the durations to bin counts
-    bin_duration = np.min(duration) / oversample
-    duration_int = np.asarray(np.round(duration / bin_duration),
-                              dtype=np.int64)
-
-    # These constants are needed by the Cython code, but we don't compute
-    # them there so that we can release the GIL.
-    eps = np.finfo(np.float64).eps
-    ninf = -np.inf
-
-    # Construct the function that evaluates the result for a single period.
-    f = partial(
-        transit_periodogram_impl,
-        t, y, ivar, duration_int, bin_duration,
-        sum_y2, sum_y, sum_ivar, eps, ninf, oversample,
-        use_likelihood)
-
-    # Apply this function, possibly in parallel.
-    return _apply(f, pool, period)
 
 
 def _transit_periodogram_slow_one(t, y, ivar, duration, oversample,
@@ -175,9 +144,5 @@ def _transit_periodogram_slow_one(t, y, ivar, duration, oversample,
     return best[1]
 
 
-def _apply(f, pool, period):
-    if pool is None:
-        mapper = map
-    else:
-        mapper = pool.map
-    return tuple(map(np.array, zip(*mapper(f, period))))
+def _apply(f, period):
+    return tuple(map(np.array, zip(*map(f, period))))

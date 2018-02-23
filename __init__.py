@@ -11,4 +11,4 @@ to discover transiting exoplanets.
 
 __all__ = ["TransitPeriodogram", "TransitPeriodogramResults"]
 
-from .transit_periodogram import TransitPeriodogram, TransitPeriodogramResults
+from .core import TransitPeriodogram, TransitPeriodogramResults

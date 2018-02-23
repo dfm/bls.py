@@ -32,7 +32,7 @@ void compute_objective(
     }
 }
 
-int fold_all (
+int run_transit_periodogram (
     // Inputs
     int N,                   // Length of the time array
     double* t,               // The list of timestamps
@@ -83,7 +83,7 @@ int fold_all (
     int* durations_index = (int*)malloc(n_durations*sizeof(int));
     if (durations_index == NULL) return -1;
     for (k = 0; k < n_durations; ++k) {
-        durations_index[k] = (int)(durations[k] / bin_duration);
+        durations_index[k] = (int)(round(durations[k] / bin_duration));
         if (durations_index[k] <= 0) durations_index[k] = 1;
     }
 

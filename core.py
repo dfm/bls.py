@@ -55,14 +55,14 @@ class TransitPeriodogram(object):
     >>> model = TransitPeriodogram(t, y)
     >>> results = model.autopower(0.16)
     >>> results.period[np.argmax(results.power)]  # doctest: +FLOAT_CMP
-    2.005441310651872
+    1.9858542275986908
 
     Compute the periodogram on a user-specified period grid:
 
     >>> periods = np.linspace(1.9, 2.1, 5)
     >>> results = model.power(periods, 0.16)
     >>> results.power  # doctest: +FLOAT_CMP
-    array([-0.142265  , -0.12027131, -0.02520321, -0.10649646, -0.13725468])
+    array([-0.142265  , -0.12027131, -0.06418401, -0.10649646, -0.13725468])
 
     If the inputs are AstroPy Quantities with units, the units will be
     validated and the outputs will also be Quantities with appropriate units:
@@ -186,7 +186,7 @@ class TransitPeriodogram(object):
         return 1.0/(maximum_frequency-df*np.arange(nf)) * self._t_unit()
 
     def autopower(self, duration, objective=None, method=None, oversample=10,
-                  pool=None, minimum_n_transit=3, minimum_period=None,
+                  minimum_n_transit=3, minimum_period=None,
                   maximum_period=None):
         """Compute the periodogram at set of heuristically determined periods
 
@@ -200,10 +200,10 @@ class TransitPeriodogram(object):
                                  minimum_period=minimum_period,
                                  maximum_period=maximum_period)
         return self.power(period, duration, objective=objective, method=method,
-                          oversample=oversample, pool=pool)
+                          oversample=oversample)
 
     def power(self, period, duration, objective=None, method=None,
-              oversample=10, pool=None):
+              oversample=10):
         """Compute the periodogram for a set of periods
 
         Parameters
@@ -228,11 +228,6 @@ class TransitPeriodogram(object):
             The number of bins per duration that should be used. This sets the
             time resolution of the phase fit with larger values of
             ``oversample`` yielding a finer grid and higher computational cost.
-        pool : optional
-            If provided, this should be an object with a ``map`` method that
-            will be used to parallelize the computation. For example, this can
-            be a :class:`multiprocessing.Pool` or a
-            :class:`multiprocessing.pool.ThreadPool`.
 
         Returns
         -------
@@ -301,7 +296,7 @@ class TransitPeriodogram(object):
         # Run the implementation
         results = transit_periodogram(
             t, y - np.median(y), ivar, period_fmt, duration,
-            oversample, use_likelihood, pool)
+            oversample, use_likelihood)
 
         return self._format_results(objective, period, results)
 
