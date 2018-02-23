@@ -13,6 +13,10 @@ IDTYPE = np.int64
 ctypedef np.int64_t IDTYPE_t
 
 
+@cython.profile(False)
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 cdef double compute_log_like(
     double y_in,
     double y_out,
@@ -33,27 +37,27 @@ cdef double compute_log_like(
 @cython.wraparound(False)
 cdef void fold(
     # Inputs
-    int N,              # Length of the time array
-    double* t,       # The list of timestamps
-    double* y,       # The y measured at ``t``
-    double* ivar,       # The inverse variance of the y array
-    double sum_y2,   # The precomputed value of sum(y^2 * ivar)
-    double sum_y,    # The precomputed value of sum(y * ivar)
-    double sum_ivar,    # The precomputed value of sum(ivar)
-    double ninf,        # Negative infinity for DTYPE
-    double eps,         # Machine precision for DTYPE
+    int N,                   # Length of the time array
+    double* t,               # The list of timestamps
+    double* y,               # The y measured at ``t``
+    double* ivar,            # The inverse variance of the y array
+    double sum_y2,           # The precomputed value of sum(y^2 * ivar)
+    double sum_y,            # The precomputed value of sum(y * ivar)
+    double sum_ivar,         # The precomputed value of sum(ivar)
+    double ninf,             # Negative infinity for DTYPE
+    double eps,              # Machine precision for DTYPE
 
-    double period,      # The period to test in units of ``t``
+    double period,           # The period to test in units of ``t``
 
-    int n_durations,    # Length of the durations array
-    int* durations,     # The durations to test in units of ``bin_duration``
-    double bin_duration,# The width of the fine-grain bins to use in units of
-                        # ``t``
-    int oversample,     # The number of ``bin_duration`` bins in the maximum duration
+    int n_durations,         # Length of the durations array
+    int* durations,          # The durations to test in units of ``bin_duration``
+    double bin_duration,     # The width of the fine-grain bins to use in units of
+                             # ``t``
+    int oversample,          # The number of ``bin_duration`` bins in the maximum duration
 
-    int use_likelihood, # A flag indicating the periodogram type
-                        # 0 - depth signal-to-noise
-                        # 1 - log likelihood
+    int use_likelihood,      # A flag indicating the periodogram type
+                             # 0 - depth signal-to-noise
+                             # 1 - log likelihood
 
     # Outputs
     double* best_objective,  # The value of the periodogram at maximum
