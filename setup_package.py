@@ -2,10 +2,7 @@
 
 import os
 from os.path import join
-
 from distutils.core import Extension
-
-from astropy_helpers.openmp_helpers import add_openmp_flags_if_available
 
 
 TRANSIT_PERIODOGRAM_ROOT = os.path.relpath(os.path.dirname(__file__))
@@ -20,5 +17,4 @@ def get_extensions():
         ],
         include_dirs=["numpy"],
     )
-    add_openmp_flags_if_available(ext)
     return [ext]
