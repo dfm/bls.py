@@ -17,19 +17,35 @@ ctypedef np.int64_t IDTYPE_t
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef double compute_log_like(
+cdef double compute_objective(
     double y_in,
     double y_out,
     double ivar_in,
+    double ivar_out,
     double sum_y2,
     double sum_y,
     double sum_ivar,
+    int obj_flag,
+    double* objective,
+    double* log_likelihood,
+    double* depth,
+    double* depth_std,
+    double* depth_snr
 ) nogil:
-    cdef double arg = y_in - y_out
-    cdef double chi2 = sum_y2 - 2*y_out*sum_y
-    chi2 += y_out*y_out * sum_ivar
-    chi2 -= arg*arg * ivar_in
-    return -0.5*chi2
+    cdef double arg, chi2
+
+    if obj_flag == 0:
+        depth[0] = y_out - y_in
+        depth_std[0] = sqrt(1.0 / ivar_in + 1.0 / ivar_out)
+        depth_snr[0] = depth[0] / depth_std[0]
+        objective[0] = depth_snr[0]
+    elif obj_flag == 1:
+        arg = y_in - y_out
+        chi2 = sum_y2 - 2*y_out*sum_y
+        chi2 += y_out*y_out * sum_ivar
+        chi2 -= arg*arg * ivar_in
+        log_likelihood[0] = -0.5*chi2
+        objective[0] = log_likelihood[0]
 
 
 @cython.cdivision(True)
@@ -55,7 +71,7 @@ cdef void fold(
                              # ``t``
     int oversample,          # The number of ``bin_duration`` bins in the maximum duration
 
-    int use_likelihood,      # A flag indicating the periodogram type
+    int obj_flag,            # A flag indicating the periodogram type
                              # 0 - depth signal-to-noise
                              # 1 - log likelihood
 
@@ -70,7 +86,7 @@ cdef void fold(
     double* best_log_like    # The log likelihood at maximum
 ) nogil:
 
-    cdef int ind, n, k
+    cdef int ind, j, n, k
     cdef double y_in, y_out, ivar_in, ivar_out, \
                 depth, depth_std, depth_snr, log_like, objective
 
@@ -133,29 +149,23 @@ cdef void fold(
             y_out /= ivar_out
 
             # Either compute the log likelihood or the signal-to-noise ratio
-            if use_likelihood:
-                objective = compute_log_like(y_in, y_out, ivar_in,
-                                             sum_y2, sum_y, sum_ivar)
-            else:
-                depth = y_out - y_in
-                depth_std = sqrt(1.0 / ivar_in + 1.0 / ivar_out)
-                objective = depth / depth_std
+            compute_objective(y_in, y_out, ivar_in, ivar_out, sum_y2, sum_y,
+                              sum_ivar, obj_flag, &objective, &log_like,
+                              &depth, &depth_std, &depth_snr)
 
             # If this is the best result seen so far, keep it
             if objective > best_objective[0]:
-                if use_likelihood:
-                    depth = y_out - y_in
-                    depth_std = sqrt(1.0 / ivar_in + 1.0 / ivar_out)
-                    depth_snr = depth / depth_std
-                    log_like = objective
-                else:
-                    log_like = compute_log_like(y_in, y_out, ivar_in,
-                                          sum_y2, sum_y,
-                                          sum_ivar)
-                    depth_snr = objective
+                best_objective[0] = objective
+
+                for j in range(2):
+                    if j == obj_flag:
+                        continue
+                    compute_objective(y_in, y_out, ivar_in, ivar_out, sum_y2,
+                                      sum_y, sum_ivar, j, &objective,
+                                      &log_like, &depth, &depth_std,
+                                      &depth_snr)
 
                 # Save the current model
-                best_objective[0] = objective
                 best_depth[0] = depth
                 best_depth_std[0] = depth_std
                 best_depth_snr[0] = depth_snr

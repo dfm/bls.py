@@ -41,7 +41,7 @@ int fold (
                              // 0 - depth signal-to-noise
                              // 1 - log likelihood
 
-    // Work arrays
+    // Work arrays - must be at least n_bins_max+1 each
     double* mean_y,
     double* mean_ivar,
 
