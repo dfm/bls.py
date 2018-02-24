@@ -47,8 +47,9 @@ def test_fast_method(data, objective):
     model = TransitPeriodogram(t, y, dy)
     periods = np.exp(np.linspace(np.log(params["period"]) - 1,
                                  np.log(params["period"]) + 1, 10))
-    results = model.power(periods, params["duration"], objective=objective)
-    results.assert_allclose(model.power(periods, params["duration"],
+    durations = params["duration"]
+    results = model.power(periods, durations, objective=objective)
+    results.assert_allclose(model.power(periods, durations,
                                         method="slow", objective=objective))
 
 

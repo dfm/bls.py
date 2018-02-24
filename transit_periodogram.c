@@ -2,6 +2,10 @@
 #include <float.h>
 #include <stdlib.h>
 
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 void compute_objective(
     double y_in,
     double y_out,
@@ -60,18 +64,15 @@ int run_transit_periodogram (
     double* best_depth_snr,  // The signal-to-noise ratio of the depth estimate
     double* best_log_like    // The log likelihood at maximum
 ) {
-    int ind, n, k, p, n_max, dur, n_bins;
-    double period, y_in, y_out, ivar_in, ivar_out, depth, depth_err, depth_snr, log_like, objective;
-
     // Start by finding the period and duration ranges
     double max_period = periods[0], min_period = periods[0];
-    for (k = 1; k < n_periods; ++k) {
+    for (int k = 1; k < n_periods; ++k) {
         if (periods[k] < min_period) min_period = periods[k];
         if (periods[k] > max_period) max_period = periods[k];
     }
     if (min_period < DBL_EPSILON) return 1;
     double min_duration = durations[0], max_duration = durations[0];
-    for (k = 1; k < n_durations; ++k) {
+    for (int k = 1; k < n_durations; ++k) {
         if (durations[k] < min_duration) min_duration = durations[k];
         if (durations[k] > max_duration) max_duration = durations[k];
     }
@@ -82,27 +83,38 @@ int run_transit_periodogram (
     int max_n_bins = (int)(max_period / bin_duration) + oversample;
     int* durations_index = (int*)malloc(n_durations*sizeof(int));
     if (durations_index == NULL) return -1;
-    for (k = 0; k < n_durations; ++k) {
+    for (int k = 0; k < n_durations; ++k) {
         durations_index[k] = (int)(round(durations[k] / bin_duration));
         if (durations_index[k] <= 0) durations_index[k] = 1;
     }
 
+    int nthreads, blocksize = max_n_bins+1;
+#pragma omp parallel
+{
+#if defined(_OPENMP)
+    nthreads = omp_get_num_threads();
+#else
+    nthreads = 1;
+#endif
+}
+
     // Allocate the work arrays
-    double* mean_y = (double*)malloc((max_n_bins+1)*sizeof(double));
-    if (mean_y == NULL) {
+    double* mean_y_0 = (double*)malloc(nthreads*blocksize*sizeof(double));
+    if (mean_y_0 == NULL) {
         free(durations_index);
         return -2;
     }
-    double* mean_ivar = (double*)malloc((max_n_bins+1)*sizeof(double));
-    if (mean_ivar == NULL) {
-        free(mean_y);
+    double* mean_ivar_0 = (double*)malloc(nthreads*blocksize*sizeof(double));
+    if (mean_ivar_0 == NULL) {
+        free(mean_y_0);
         free(durations_index);
         return -3;
     }
 
     // Pre-accumulate some factors.
     double sum_y2 = 0.0, sum_y = 0.0, sum_ivar = 0.0;
-    for (n = 0; n < N; ++n) {
+    #pragma omp parallel for reduction(+:sum_y2), reduction(+:sum_y), reduction(+:sum_ivar)
+    for (int n = 0; n < N; ++n) {
         double tmp = y[n] * ivar[n];
         sum_y2 += y[n] * tmp;
         sum_y += tmp;
@@ -110,26 +122,36 @@ int run_transit_periodogram (
     }
 
     // Loop over periods and do the search
-    for (p = 0; p < n_periods; ++p) {
-        period = periods[p];
-        n_bins = (int)(period / bin_duration) + oversample;
+    #pragma omp parallel for
+    for (int p = 0; p < n_periods; ++p) {
+#if defined(_OPENMP)
+        int ithread = omp_get_thread_num();
+#else
+        int ithread = 0;
+#endif
+        int block = blocksize * ithread;
+        double period = periods[p];
+        int n_bins = (int)(period / bin_duration) + oversample;
+
+        double* mean_y = mean_y_0 + block;
+        double* mean_ivar = mean_ivar_0 + block;
 
         // This first pass bins the data into a fine-grain grid in phase from zero
         // to period and computes the weighted sum and inverse variance for each
         // bin.
-        for (n = 0; n < n_bins+1; ++n) {
+        for (int n = 0; n < n_bins+1; ++n) {
             mean_y[n] = 0.0;
             mean_ivar[n] = 0.0;
         }
-        for (n = 0; n < N; ++n) {
-            ind = (int)(fabs(fmod(t[n], period)) / bin_duration) + 1;
+        for (int n = 0; n < N; ++n) {
+            int ind = (int)(fabs(fmod(t[n], period)) / bin_duration) + 1;
             mean_y[ind] += y[n] * ivar[n];
             mean_ivar[ind] += ivar[n];
         }
 
         // To simplify calculations below, we wrap the binned values around and pad
         // the end of the array with the first ``oversample`` samples.
-        for (n = 1, ind = n_bins - oversample; n <= oversample; ++n, ++ind) {
+        for (int n = 1, ind = n_bins - oversample; n <= oversample; ++n, ++ind) {
             mean_y[ind] = mean_y[n];
             mean_ivar[ind] = mean_ivar[n];
         }
@@ -139,7 +161,7 @@ int run_transit_periodogram (
         // fast, we can compute the cumulative sum and then use differences between
         // points separated by ``duration`` bins. Here we convert the mean arrays
         // to cumulative sums.
-        for (n = 1; n <= n_bins; ++n) {
+        for (int n = 1; n <= n_bins; ++n) {
             mean_y[n] += mean_y[n-1];
             mean_ivar[n] += mean_ivar[n-1];
         }
@@ -147,16 +169,17 @@ int run_transit_periodogram (
         // Then we loop over phases (in steps of n_bin) and durations and find the
         // best fit value. By looping over durations here, we get to reuse a lot of
         // the computations that we did above.
+        double objective, log_like, depth, depth_err, depth_snr;
         best_objective[p] = -INFINITY;
-        for (k = 0; k < n_durations; ++k) {
-            dur = durations_index[k];
-            n_max = n_bins-dur;
-            for (n = 0; n <= n_max; ++n) {
+        for (int k = 0; k < n_durations; ++k) {
+            int dur = durations_index[k];
+            int n_max = n_bins-dur;
+            for (int n = 0; n <= n_max; ++n) {
                 // Estimate the in-transit and out-of-transit flux
-                y_in = mean_y[n+dur] - mean_y[n];
-                ivar_in = mean_ivar[n+dur] - mean_ivar[n];
-                y_out = sum_y - y_in;
-                ivar_out = sum_ivar - ivar_in;
+                double y_in = mean_y[n+dur] - mean_y[n];
+                double ivar_in = mean_ivar[n+dur] - mean_ivar[n];
+                double y_out = sum_y - y_in;
+                double ivar_out = sum_ivar - ivar_in;
 
                 // Skip this model if there are no points in transit
                 if ((ivar_in < DBL_EPSILON) || (ivar_out < DBL_EPSILON)) {
@@ -193,8 +216,8 @@ int run_transit_periodogram (
 
     // Clean up
     free(durations_index);
-    free(mean_y);
-    free(mean_ivar);
+    free(mean_y_0);
+    free(mean_ivar_0);
 
     return 0;
 }
