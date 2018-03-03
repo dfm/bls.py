@@ -31,6 +31,26 @@ or, install using ``pip``:
 .. code-block:: bash
 
     pip install https://github.com/dfm/astropy-transit-periodogram/archive/master.zip
+    
+**OpenMP support**: This algorithm can optionally be parallelized using OpenMP.
+To enable this feature, you must compile with a compiler that supports OpenMP and the
+relevant flags. On macOS, this can be achieved by installing a recent ``llvm``:
+
+.. code-block:: bash
+
+    brew install llvm
+ 
+and then building using the following flags:
+
+.. code-block:: bash
+
+    CC=/usr/local/opt/llvm/bin/clang CFLAGS="-L/usr/local/opt/llvm/lib -lomp -fopenmp" python setup.py install
+    
+On other platforms, a command like the following might be sufficient:
+
+.. code-block:: bash
+
+    CFLAGS="-lgomp -fopenmp" python setup.py install
 
 Usage
 -----
