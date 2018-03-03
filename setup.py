@@ -21,7 +21,12 @@ def get_extensions():
 
 setup(
     name="transit_periodogram",
+    version="0.1.0",
+    author="Daniel Foreman-Mackey & Ze Vinicius",
+    author_email="foreman.mackey@gmail.com",
+    url="https://github.com/dfm/astropy-transit-periodogram",
+    license="BSD",
     packages=["transit_periodogram"],
     ext_modules=get_extensions(),
-    setup_require=["numpy"],
+    setup_require=["numpy", "cython"],
 )
