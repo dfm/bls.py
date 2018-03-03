@@ -31,3 +31,8 @@ or, install using ``pip``:
 .. code-block:: bash
 
     pip install https://github.com/dfm/astropy-transit-periodogram/archive/master.zip
+
+Usage
+-----
+
+See ``tutorial.ipynb`` for a demonstration of how to use the code.
