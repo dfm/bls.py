@@ -169,13 +169,17 @@ class TransitPeriodogram(object):
         # If no maximum period is provided, choose one by requiring that
         # all signals with at least minimum_n_transit should be detectable.
         if maximum_period is None:
-            maximum_period = baseline / minimum_n_transit
+            if minimum_n_transit <= 1:
+                raise ValueError("minimum_n_transit must be greater than 1")
+            maximum_period = baseline / (minimum_n_transit-1)
         else:
             maximum_period = validate_unit_consistency(self.t, maximum_period)
             maximum_period = strip_units(maximum_period)
 
         if maximum_period < minimum_period:
             minimum_period, maximum_period = maximum_period, minimum_period
+        if minimum_period <= 0.0:
+            raise ValueError("minimum_period must be positive")
 
         # Convert bounds to frequency
         minimum_frequency = 1.0/strip_units(maximum_period)
@@ -349,6 +353,38 @@ class TransitPeriodogram(object):
         y_model[m_model] = y_in
 
         return y_model * self._y_unit()
+
+    def transit_mask(self, t, period, duration, transit_time):
+        """Compute which data points are in transit for a given parameter set
+
+        Parameters
+        ----------
+        t_model : array-like or Quantity
+            Times where the mask should be evaluated.
+        period : float or Quantity
+            The period of the transits.
+        duration : float or Quantity
+            The duration of the transit.
+        transit_time : float or Quantity
+            The mid-transit time of a reference transit.
+
+        Returns
+        -------
+        transit_mask : array-like
+            A boolean array where ``True`` indicates and in transit point and
+            ``False`` indicates and out-of-transit point.
+
+        """
+        period, duration = self._validate_period_and_duration(period, duration)
+        transit_time = validate_unit_consistency(self.t, transit_time)
+        t = strip_units(validate_unit_consistency(self.t, t))
+
+        period = float(strip_units(period))
+        duration = float(strip_units(duration))
+        transit_time = float(strip_units(transit_time))
+
+        hp = 0.5*period
+        return np.abs((t-transit_time+hp) % period - hp) < 0.5*duration
 
     def _validate_inputs(self, t, y, dy):
         """Private method used to check the consistency of the inputs
