@@ -191,7 +191,7 @@ class TransitPeriodogram(object):
 
     def autopower(self, duration, objective=None, method=None, oversample=10,
                   minimum_n_transit=3, minimum_period=None,
-                  maximum_period=None):
+                  maximum_period=None, frequency_factor=1.0):
         """Compute the periodogram at set of heuristically determined periods
 
         This method calls :func:`TransitPeriodogram.autoperiod` to determine
@@ -202,7 +202,8 @@ class TransitPeriodogram(object):
         period = self.autoperiod(duration,
                                  minimum_n_transit=minimum_n_transit,
                                  minimum_period=minimum_period,
-                                 maximum_period=maximum_period)
+                                 maximum_period=maximum_period,
+                                 frequency_factor=frequency_factor)
         return self.power(period, duration, objective=objective, method=method,
                           oversample=oversample)
 
