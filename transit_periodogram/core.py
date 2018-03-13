@@ -355,6 +355,80 @@ class TransitPeriodogram(object):
 
         return y_model * self._y_unit()
 
+    def compute_stats(self, period, duration, transit_time):
+        period, duration = self._validate_period_and_duration(period, duration)
+        transit_time = validate_unit_consistency(self.t, transit_time)
+
+        period = float(strip_units(period))
+        duration = float(strip_units(duration))
+        transit_time = float(strip_units(transit_time))
+
+        t = np.ascontiguousarray(strip_units(self.t), dtype=np.float64)
+        y = np.ascontiguousarray(strip_units(self.y), dtype=np.float64)
+        if self.dy is None:
+            ivar = np.ones_like(y)
+        else:
+            ivar = 1.0 / np.ascontiguousarray(strip_units(self.dy),
+                                              dtype=np.float64)**2
+
+        # Compute the depth
+        hp = 0.5*period
+        m_in = np.abs((t-transit_time+hp) % period - hp) < 0.5*duration
+        y_in = np.sum(y[m_in] * ivar[m_in]) / np.sum(ivar[m_in])
+
+        # Compute the counts
+        N_in = m_in.sum()
+        transit_id = np.round((t[m_in]-transit_time) / period).astype(int)
+        unique_ids, unique_counts = np.unique(transit_id, return_counts=True)
+        transit_id -= np.min(unique_ids)
+        unique_ids -= np.min(unique_ids)
+        N_tran = len(unique_ids)
+        counts = np.zeros(np.max(unique_ids) + 1, dtype=int)
+        counts[unique_ids] = unique_counts
+
+        # Compute the per-transit log likelihood
+        ll = -0.5*((y[m_in] - y_in)**2 * ivar[m_in] - np.log(ivar[m_in])
+                   + np.log(2*np.pi))
+        lls = np.zeros(len(counts))
+        for i in unique_ids:
+            lls[i] = np.sum(ll[transit_id == i])
+
+        # Depths at 2 * period
+        m_in_1 = np.abs((t-transit_time+period) % (2*period) - period) \
+            < 0.5*duration
+        m_in_2 = np.abs((t-transit_time) % (2*period) - period) < 0.5*duration
+        m_out = ~(m_in_1 | m_in_2)
+        if np.any(m_out):
+            ivar_out = np.sum(ivar[m_out])
+            y_out = np.sum(y[m_out] * ivar[m_out]) / ivar_out
+            var_out = 1.0 / ivar_out
+        else:
+            y_out = 0.0
+            var_out = np.inf
+
+        if np.any(m_in_1):
+            ivar_in_1 = np.sum(ivar[m_in_1])
+            y_in_1 = np.sum(y[m_in_1] * ivar[m_in_1]) / ivar_in_1
+            depth_even = y_out - y_in_1, np.sqrt(1.0/ivar_in_1 + var_out)
+        else:
+            depth_even = (0.0, np.inf)
+
+        if np.any(m_in_2):
+            ivar_in_2 = np.sum(ivar[m_in_2])
+            y_in_2 = np.sum(y[m_in_2] * ivar[m_in_2]) / ivar_in_2
+            depth_odd = y_out - y_in_2, np.sqrt(1.0/ivar_in_2 + var_out)
+        else:
+            depth_odd = (0.0, np.inf)
+
+        return dict(
+            transit_count=N_tran,
+            in_transit_count=N_in,
+            per_transit_count=counts,
+            log_like_per_transit=lls,
+            depth_odd=depth_odd,
+            depth_even=depth_even,
+        )
+
     def transit_mask(self, t, period, duration, transit_time):
         """Compute which data points are in transit for a given parameter set
 
