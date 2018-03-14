@@ -422,12 +422,13 @@ class TransitPeriodogram(object):
         # the period
         hp = 0.5*period
         m_in = np.abs((t-transit_time+hp) % period - hp) < 0.5*duration
+        m_out = ~m_in
         m_odd = np.abs((t-transit_time) % (2*period) - period) \
             < 0.5*duration
         m_even = np.abs((t-transit_time+period) % (2*period) - period) \
             < 0.5*duration
 
-        y_out, var_out = _compute_depth(~m_in)
+        y_out, var_out = _compute_depth(m_out)
         depth = _compute_depth(m_in, y_out, var_out)
         depth_odd = _compute_depth(m_odd, y_out, var_out)
         depth_even = _compute_depth(m_even, y_out, var_out)
@@ -444,15 +445,17 @@ class TransitPeriodogram(object):
         transit_id = transit_id[m_in]
 
         # Compute the per-transit log likelihood
-        ll = -0.5*((y[m_in] - y_in)**2 * ivar[m_in] - np.log(ivar[m_in])
-                   + np.log(2*np.pi))
+        resid2_in = (y[m_in] - y_in)**2
+        resid2_out = (y[m_out] - y_out)**2
+        ll = -0.5*(resid2_in * ivar[m_in]-np.log(ivar[m_in])+np.log(2*np.pi))
         lls = np.zeros(len(counts))
         for i in unique_ids:
             lls[i] = np.sum(ll[transit_id == i])
         full_ll = np.sum(ll)
-        m_out = ~m_in
-        full_ll += -0.5*np.sum((y[m_out] - y_out)**2 * ivar[m_out]
-                               - np.log(ivar[m_out]) + np.log(2*np.pi))
+        full_ll += -0.5*np.sum(resid2_out*ivar[m_out]-np.log(ivar[m_out])
+                               + np.log(2*np.pi))
+        rms_in = np.sqrt(np.sum(resid2_in*ivar[m_in])/np.sum(ivar[m_in]))
+        rms_out = np.sqrt(np.sum(resid2_out*ivar[m_out])/np.sum(ivar[m_out]))
 
         # Compute the log likelihood of a sine model
         A = np.vstack((
@@ -469,6 +472,7 @@ class TransitPeriodogram(object):
         return dict(
             per_transit_count=counts,
             per_transit_log_like=lls,
+            rms=(rms_out, rms_in),
             depth=(depth[0] * y_unit, depth[1] * y_unit),
             depth_odd=(depth_odd[0] * y_unit, depth_odd[1] * y_unit),
             depth_even=(depth_even[0] * y_unit, depth_even[1] * y_unit),
