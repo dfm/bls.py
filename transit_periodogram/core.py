@@ -356,6 +356,42 @@ class TransitPeriodogram(object):
         return y_model * self._y_unit()
 
     def compute_stats(self, period, duration, transit_time):
+        """Compute descriptive statistics for a given transit model
+
+        These statistics are commonly used for vetting of transit candidates.
+        For example, the difference between the depth of the even and odd
+        transits can be used to test for eclipsing binaries.
+
+        Parameters
+        ----------
+        period : float or Quantity
+            The period of the transits.
+        duration : float or Quantity
+            The duration of the transit.
+        transit_time : float or Quantity
+            The mid-transit time of a reference transit.
+
+        Returns
+        -------
+        stats : dict
+            A dictionary containing several descriptive statistics:
+            - ``depth``: The depth and uncertainty (as a tuple with two
+                values) on the depth for the fiducial model.
+            - ``depth_odd``: The depth and uncertainty on the depth for a
+                model where the period is twice the fiducial period.
+            - ``depth_even``: The depth and uncertainty on the depth for a
+                model where the period is twice the fiducial period and the
+                phase is offset by one orbital period.
+            - ``harmonic_delta_log_likelihood``: The difference in log
+                likelihood between a sinusoidal model and the transit model.
+                If ``harmonic_delta_log_likelihood`` is greater than zero, the
+                sinusoidal model is preferred.
+            - ``per_transit_count``: An array with a count of the number of
+                data points in each unique transit included in the baseline.
+            - ``per_transit_log_like``: An array with the value of the log
+                likelihood for each unique transit included in the baseline.
+
+        """
         period, duration = self._validate_period_and_duration(period, duration)
         transit_time = validate_unit_consistency(self.t, transit_time)
 
@@ -371,20 +407,41 @@ class TransitPeriodogram(object):
             ivar = 1.0 / np.ascontiguousarray(strip_units(self.dy),
                                               dtype=np.float64)**2
 
-        # Compute the depth
+        # This a helper function that will compute the depth for several
+        # different hypothesized transit models with different parameters
+        def _compute_depth(m, y_out=None, var_out=None):
+            if np.any(m) and (var_out is None or np.isfinite(var_out)):
+                var_m = 1.0 / np.sum(ivar[m])
+                y_m = np.sum(y[m] * ivar[m]) * var_m
+                if y_out is None:
+                    return y_m, var_m
+                return y_out - y_m, np.sqrt(var_m + var_out)
+            return 0.0, np.inf
+
+        # Compute the depth of the fiducial model and the two models at twice
+        # the period
         hp = 0.5*period
         m_in = np.abs((t-transit_time+hp) % period - hp) < 0.5*duration
-        y_in = np.sum(y[m_in] * ivar[m_in]) / np.sum(ivar[m_in])
+        m_odd = np.abs((t-transit_time) % (2*period) - period) \
+            < 0.5*duration
+        m_even = np.abs((t-transit_time+period) % (2*period) - period) \
+            < 0.5*duration
 
-        # Compute the counts
-        N_in = m_in.sum()
-        transit_id = np.round((t[m_in]-transit_time) / period).astype(int)
-        unique_ids, unique_counts = np.unique(transit_id, return_counts=True)
-        transit_id -= np.min(unique_ids)
-        unique_ids -= np.min(unique_ids)
-        N_tran = len(unique_ids)
-        counts = np.zeros(np.max(unique_ids) + 1, dtype=int)
+        y_out, var_out = _compute_depth(~m_in)
+        depth = _compute_depth(m_in, y_out, var_out)
+        depth_odd = _compute_depth(m_odd, y_out, var_out)
+        depth_even = _compute_depth(m_even, y_out, var_out)
+        y_in = y_out - depth[0]
+
+        # Compute the number of points in each transit
+        transit_id = np.round((t-transit_time) / period).astype(int)
+        unique_ids, unique_counts = np.unique(transit_id[m_in],
+                                              return_counts=True)
+        unique_ids -= np.min(transit_id)
+        transit_id -= np.min(transit_id)
+        counts = np.zeros(np.max(transit_id) + 1, dtype=int)
         counts[unique_ids] = unique_counts
+        transit_id = transit_id[m_in]
 
         # Compute the per-transit log likelihood
         ll = -0.5*((y[m_in] - y_in)**2 * ivar[m_in] - np.log(ivar[m_in])
@@ -392,41 +449,30 @@ class TransitPeriodogram(object):
         lls = np.zeros(len(counts))
         for i in unique_ids:
             lls[i] = np.sum(ll[transit_id == i])
+        full_ll = np.sum(ll)
+        m_out = ~m_in
+        full_ll += -0.5*np.sum((y[m_out] - y_out)**2 * ivar[m_out]
+                               - np.log(ivar[m_out]) + np.log(2*np.pi))
 
-        # Depths at 2 * period
-        m_in_1 = np.abs((t-transit_time+period) % (2*period) - period) \
-            < 0.5*duration
-        m_in_2 = np.abs((t-transit_time) % (2*period) - period) < 0.5*duration
-        m_out = ~(m_in_1 | m_in_2)
-        if np.any(m_out):
-            ivar_out = np.sum(ivar[m_out])
-            y_out = np.sum(y[m_out] * ivar[m_out]) / ivar_out
-            var_out = 1.0 / ivar_out
-        else:
-            y_out = 0.0
-            var_out = np.inf
+        # Compute the log likelihood of a sine model
+        A = np.vstack((
+            np.sin(2*np.pi*t/period), np.cos(2*np.pi*t/period),
+            np.ones_like(t)
+        )).T
+        w = np.linalg.solve(np.dot(A.T, A * ivar[:, None]),
+                            np.dot(A.T, y * ivar))
+        mod = np.dot(A, w)
+        sin_ll = -0.5*np.sum((y-mod)**2*ivar + np.log(2*np.pi/ivar))
 
-        if np.any(m_in_1):
-            ivar_in_1 = np.sum(ivar[m_in_1])
-            y_in_1 = np.sum(y[m_in_1] * ivar[m_in_1]) / ivar_in_1
-            depth_even = y_out - y_in_1, np.sqrt(1.0/ivar_in_1 + var_out)
-        else:
-            depth_even = (0.0, np.inf)
-
-        if np.any(m_in_2):
-            ivar_in_2 = np.sum(ivar[m_in_2])
-            y_in_2 = np.sum(y[m_in_2] * ivar[m_in_2]) / ivar_in_2
-            depth_odd = y_out - y_in_2, np.sqrt(1.0/ivar_in_2 + var_out)
-        else:
-            depth_odd = (0.0, np.inf)
-
+        # Format the results
+        y_unit = self._y_unit()
         return dict(
-            transit_count=N_tran,
-            in_transit_count=N_in,
             per_transit_count=counts,
-            log_like_per_transit=lls,
-            depth_odd=depth_odd,
-            depth_even=depth_even,
+            per_transit_log_like=lls,
+            depth=(depth[0] * y_unit, depth[1] * y_unit),
+            depth_odd=(depth_odd[0] * y_unit, depth_odd[1] * y_unit),
+            depth_even=(depth_even[0] * y_unit, depth_even[1] * y_unit),
+            harmonic_delta_log_likelihood=sin_ll - full_ll,
         )
 
     def transit_mask(self, t, period, duration, transit_time):

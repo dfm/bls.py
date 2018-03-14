@@ -196,7 +196,7 @@ int run_transit_periodogram (
                         &objective, &log_like, &depth, &depth_err, &depth_snr);
 
                 // If this is the best result seen so far, keep it
-                if (objective > best_objective[p]) {
+                if (y_out >= y_in && objective > best_objective[p]) {
                     best_objective[p] = objective;
 
                     // Compute the other parameters
