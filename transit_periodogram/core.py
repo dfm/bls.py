@@ -27,8 +27,7 @@ class TransitPeriodogram(object):
     This method is a commonly used tool for discovering transiting exoplanets
     or eclipsing binaries in photometric time series datasets. This
     implementation is based on the "box least squares (BLS)" method described
-    in [1]_ with added support for observational uncertainties,
-    parallelization, and a likelihood model.
+    in [1]_ and [2]_.
 
     Parameters
     ----------
@@ -81,6 +80,8 @@ class TransitPeriodogram(object):
     ----------
     .. [1] Kovacs, Zucker, & Mazeh (2002), A&A, 391, 369
         (arXiv:astro-ph/0206099)
+    .. [2] Hartman & Bakos (2016), Astronomy & Computing, 17, 1
+        (arXiv:1605.06811)
 
     """
 
@@ -359,8 +360,6 @@ class TransitPeriodogram(object):
         """Compute descriptive statistics for a given transit model
 
         These statistics are commonly used for vetting of transit candidates.
-        For example, the difference between the depth of the even and odd
-        transits can be used to test for eclipsing binaries.
 
         Parameters
         ----------
@@ -386,10 +385,16 @@ class TransitPeriodogram(object):
                 likelihood between a sinusoidal model and the transit model.
                 If ``harmonic_delta_log_likelihood`` is greater than zero, the
                 sinusoidal model is preferred.
+            - ``transit_times``: The mid-transit time for each transit in the
+                baseline.
             - ``per_transit_count``: An array with a count of the number of
                 data points in each unique transit included in the baseline.
             - ``per_transit_log_like``: An array with the value of the log
                 likelihood for each unique transit included in the baseline.
+            - ``rms_in_transit``: The root mean squared scatter of the data
+                points in transit.
+            - ``rms_out_of_transit``: The root mean squared scatter of the
+                data points out of transit.
 
         """
         period, duration = self._validate_period_and_duration(period, duration)
@@ -434,15 +439,26 @@ class TransitPeriodogram(object):
         depth_even = _compute_depth(m_even, y_out, var_out)
         y_in = y_out - depth[0]
 
+        # Compute the depth of the model at a phase of 0.5*period
+        m_phase = np.abs((t-transit_time) % period - hp) < 0.5*duration
+        depth_phase = _compute_depth(m_phase,
+                                     *_compute_depth((~m_phase) & m_out))
+
+        # Compute the depth of a model with a period of 0.5*period
+        m_half = np.abs((t-transit_time+0.25*period) % (0.5*period)
+                        - 0.25*period) < 0.5*duration
+        depth_half = _compute_depth(m_half, *_compute_depth(~m_half))
+
         # Compute the number of points in each transit
-        transit_id = np.round((t-transit_time) / period).astype(int)
-        unique_ids, unique_counts = np.unique(transit_id[m_in],
+        transit_id = np.round((t[m_in]-transit_time) / period).astype(int)
+        transit_times = period * np.arange(transit_id.min(),
+                                           transit_id.max()+1) + transit_time
+        unique_ids, unique_counts = np.unique(transit_id,
                                               return_counts=True)
         unique_ids -= np.min(transit_id)
         transit_id -= np.min(transit_id)
         counts = np.zeros(np.max(transit_id) + 1, dtype=int)
         counts[unique_ids] = unique_counts
-        transit_id = transit_id[m_in]
 
         # Compute the per-transit log likelihood
         resid2_in = (y[m_in] - y_in)**2
@@ -470,10 +486,14 @@ class TransitPeriodogram(object):
         # Format the results
         y_unit = self._y_unit()
         return dict(
+            transit_times=transit_times * self._t_unit(),
             per_transit_count=counts,
             per_transit_log_like=lls,
-            rms=(rms_out, rms_in),
+            rms_out_of_transit=rms_out * y_unit,
+            rms_in_transit=rms_in * y_unit,
             depth=(depth[0] * y_unit, depth[1] * y_unit),
+            depth_phased=(depth_phase[0] * y_unit, depth_phase[1] * y_unit),
+            depth_half=(depth_half[0] * y_unit, depth_half[1] * y_unit),
             depth_odd=(depth_odd[0] * y_unit, depth_odd[1] * y_unit),
             depth_even=(depth_even[0] * y_unit, depth_even[1] * y_unit),
             harmonic_delta_log_likelihood=sin_ll - full_ll,
