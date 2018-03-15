@@ -44,7 +44,10 @@ and then building using the following flags:
 
 .. code-block:: bash
 
-    CC=/usr/local/opt/llvm/bin/clang CFLAGS="-L/usr/local/opt/llvm/lib -lomp -fopenmp" python setup.py install
+    CC=/usr/local/opt/llvm/bin/clang \
+     LDFLAGS="-L/usr/local/opt/llvm/lib -Wl,-rpath,/usr/local/opt/llvm/lib -liomp5" \
+     CFLAGS="-I/usr/local/opt/llvm/include -fopenmp" \
+     python setup.py install
     
 On other platforms, a command like the following might be sufficient:
 
