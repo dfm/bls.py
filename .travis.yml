@@ -20,7 +20,8 @@ install:
   - conda info -a
   - conda create --yes -n test python=$TRAVIS_PYTHON_VERSION numpy astropy cython pytest
   - source activate test
-  - python setup.py develop
+  - CFLAGS="-fopenmp" python setup.py develop
 
 script:
+  - export OMP_NUM_THREADS=2
   - py.test -v bls
