@@ -5,6 +5,10 @@ python:
   - "3.5"
   - "3.6"
 
+env:
+  - CFLAGS="-fopenmp" OMP_NUM_THREADS=2
+  - CFLAGS="" OMP_NUM_THREADS=1
+
 install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
       wget https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -O miniconda.sh;
@@ -20,8 +24,7 @@ install:
   - conda info -a
   - conda create --yes -n test python=$TRAVIS_PYTHON_VERSION numpy astropy cython pytest
   - source activate test
-  - CFLAGS="-fopenmp" python setup.py develop
+  - python setup.py develop
 
 script:
-  - export OMP_NUM_THREADS=2
   - py.test -v bls
