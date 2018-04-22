@@ -4,4 +4,4 @@ __pycache__
 *.pyc
 *.so
 .DS_Store
-*.egg=info
+*.egg-info
