@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-__all__ = ["TransitPeriodogram", "TransitPeriodogramResults"]
+__all__ = ["BLS", "BLSResults"]
 
 import numpy as np
 
@@ -21,8 +21,8 @@ def validate_unit_consistency(reference_object, input_object):
     return input_object
 
 
-class TransitPeriodogram(object):
-    """Compute the Transit Periodogram
+class BLS(object):
+    """Compute the box least squares periodogram
 
     This method is a commonly used tool for discovering transiting exoplanets
     or eclipsing binaries in photometric time series datasets. This
@@ -51,17 +51,17 @@ class TransitPeriodogram(object):
     Compute the transit periodogram on a heuristically determined period grid
     and find the period with maximum power:
 
-    >>> model = TransitPeriodogram(t, y)
+    >>> model = BLS(t, y)
     >>> results = model.autopower(0.16)
     >>> results.period[np.argmax(results.power)]  # doctest: +FLOAT_CMP
-    1.9858542275986908
+    2.005441310651872
 
     Compute the periodogram on a user-specified period grid:
 
     >>> periods = np.linspace(1.9, 2.1, 5)
     >>> results = model.power(periods, 0.16)
     >>> results.power  # doctest: +FLOAT_CMP
-    array([-0.142265  , -0.12027131, -0.06418401, -0.10649646, -0.13725468])
+    array([0.01479464, 0.03804835, 0.09640946, 0.05199547, 0.01970484])
 
     If the inputs are AstroPy Quantities with units, the units will be
     validated and the outputs will also be Quantities with appropriate units:
@@ -69,7 +69,7 @@ class TransitPeriodogram(object):
     >>> from astropy import units as u
     >>> t = t * u.day
     >>> y = y * u.dimensionless_unscaled
-    >>> model = TransitPeriodogram(t, y)
+    >>> model = BLS(t, y)
     >>> results = model.autopower(0.16 * u.day)
     >>> results.period.unit
     Unit("d")
@@ -195,8 +195,8 @@ class TransitPeriodogram(object):
                   maximum_period=None, frequency_factor=1.0):
         """Compute the periodogram at set of heuristically determined periods
 
-        This method calls :func:`TransitPeriodogram.autoperiod` to determine
-        the period grid and then :func:`TransitPeriodogram.power` to compute
+        This method calls :func:`BLS.autoperiod` to determine
+        the period grid and then :func:`BLS.power` to compute
         the periodogram. See those methods for documentation of the arguments.
 
         """
@@ -237,8 +237,8 @@ class TransitPeriodogram(object):
 
         Returns
         -------
-        results : TransitPeriodogramResults
-            The periodogram results as a :class:`TransitPeriodogramResults`
+        results : BLSResults
+            The periodogram results as a :class:`BLSResults`
             object.
 
         Raises
@@ -295,12 +295,12 @@ class TransitPeriodogram(object):
 
         # Select the correct implementation for the chosen method
         if method == "fast":
-            transit_periodogram = methods.transit_periodogram_fast
+            bls = methods.bls_fast
         else:
-            transit_periodogram = methods.transit_periodogram_slow
+            bls = methods.bls_slow
 
         # Run the implementation
-        results = transit_periodogram(
+        results = bls(
             t, y - np.median(y), ivar, period_fmt, duration,
             oversample, use_likelihood)
 
@@ -374,6 +374,7 @@ class TransitPeriodogram(object):
         -------
         stats : dict
             A dictionary containing several descriptive statistics:
+
             - ``depth``: The depth and uncertainty (as a tuple with two
                 values) on the depth for the fiducial model.
             - ``depth_odd``: The depth and uncertainty on the depth for a
@@ -381,6 +382,8 @@ class TransitPeriodogram(object):
             - ``depth_even``: The depth and uncertainty on the depth for a
                 model where the period is twice the fiducial period and the
                 phase is offset by one orbital period.
+            - ``harmonic_amplitude``: The amplitude of the best fit sinusoidal
+                model.
             - ``harmonic_delta_log_likelihood``: The difference in log
                 likelihood between a sinusoidal model and the transit model.
                 If ``harmonic_delta_log_likelihood`` is greater than zero, the
@@ -389,12 +392,9 @@ class TransitPeriodogram(object):
                 baseline.
             - ``per_transit_count``: An array with a count of the number of
                 data points in each unique transit included in the baseline.
-            - ``per_transit_log_like``: An array with the value of the log
-                likelihood for each unique transit included in the baseline.
-            - ``rms_in_transit``: The root mean squared scatter of the data
-                points in transit.
-            - ``rms_out_of_transit``: The root mean squared scatter of the
-                data points out of transit.
+            - ``per_transit_log_likelihood``: An array with the value of the
+                log likelihood for each unique transit included in the
+                baseline.
 
         """
         period, duration = self._validate_period_and_duration(period, duration)
@@ -461,17 +461,12 @@ class TransitPeriodogram(object):
         counts[unique_ids] = unique_counts
 
         # Compute the per-transit log likelihood
-        resid2_in = (y[m_in] - y_in)**2
-        resid2_out = (y[m_out] - y_out)**2
-        ll = -0.5*(resid2_in * ivar[m_in]-np.log(ivar[m_in])+np.log(2*np.pi))
+        ll = -0.5 * ivar[m_in] * ((y[m_in] - y_in)**2 - (y[m_in] - y_out)**2)
         lls = np.zeros(len(counts))
         for i in unique_ids:
             lls[i] = np.sum(ll[transit_id == i])
-        full_ll = np.sum(ll)
-        full_ll += -0.5*np.sum(resid2_out*ivar[m_out]-np.log(ivar[m_out])
-                               + np.log(2*np.pi))
-        rms_in = np.sqrt(np.sum(resid2_in*ivar[m_in])/np.sum(ivar[m_in]))
-        rms_out = np.sqrt(np.sum(resid2_out*ivar[m_out])/np.sum(ivar[m_out]))
+        full_ll = -0.5*np.sum(ivar[m_in] * (y[m_in] - y_in)**2)
+        full_ll -= 0.5*np.sum(ivar[m_out] * (y[m_out] - y_out)**2)
 
         # Compute the log likelihood of a sine model
         A = np.vstack((
@@ -481,22 +476,24 @@ class TransitPeriodogram(object):
         w = np.linalg.solve(np.dot(A.T, A * ivar[:, None]),
                             np.dot(A.T, y * ivar))
         mod = np.dot(A, w)
-        sin_ll = -0.5*np.sum((y-mod)**2*ivar + np.log(2*np.pi/ivar))
+        sin_ll = -0.5*np.sum((y-mod)**2*ivar)
 
         # Format the results
         y_unit = self._y_unit()
+        ll_unit = 1
+        if self.dy is None:
+            ll_unit = y_unit * y_unit
         return dict(
             transit_times=transit_times * self._t_unit(),
             per_transit_count=counts,
-            per_transit_log_like=lls,
-            rms_out_of_transit=rms_out * y_unit,
-            rms_in_transit=rms_in * y_unit,
+            per_transit_log_likelihood=lls * ll_unit,
             depth=(depth[0] * y_unit, depth[1] * y_unit),
             depth_phased=(depth_phase[0] * y_unit, depth_phase[1] * y_unit),
             depth_half=(depth_half[0] * y_unit, depth_half[1] * y_unit),
             depth_odd=(depth_odd[0] * y_unit, depth_odd[1] * y_unit),
             depth_even=(depth_even[0] * y_unit, depth_even[1] * y_unit),
-            harmonic_delta_log_likelihood=sin_ll - full_ll,
+            harmonic_amplitude=np.sqrt(np.sum(w[:2]**2)) * y_unit,
+            harmonic_delta_log_likelihood=(sin_ll - full_ll) * ll_unit,
         )
 
     def transit_mask(self, t, period, duration, transit_time):
@@ -664,9 +661,9 @@ class TransitPeriodogram(object):
                 power = units.Quantity(power, unit=units.one)
                 log_likelihood = units.Quantity(log_likelihood, unit=units.one)
 
-        return TransitPeriodogramResults(objective, period, power, depth,
-                                         depth_err, transit_time, duration,
-                                         depth_snr, log_likelihood)
+        return BLSResults(objective, period, power, depth,
+                          depth_err, transit_time, duration,
+                          depth_snr, log_likelihood)
 
     def _t_unit(self):
         if has_units(self.t):
@@ -681,14 +678,14 @@ class TransitPeriodogram(object):
             return 1
 
 
-class TransitPeriodogramResults(dict):
-    """The results of a TransitPeriodogram search
+class BLSResults(dict):
+    """The results of a BLS search
 
     Attributes
     ----------
     objective : string
         The scalar used to optimize to find the best fit phase, duration, and
-        depth. See :func:`TransitPeriodogram.power` for more information.
+        depth. See :func:`BLS.power` for more information.
     period : array-like or Quantity
         The set of test periods.
     power : array-like or Quantity
@@ -716,7 +713,7 @@ class TransitPeriodogramResults(dict):
 
     """
     def __init__(self, *args):
-        super(TransitPeriodogramResults, self).__init__(zip(
+        super(BLSResults, self).__init__(zip(
             ("objective", "period", "power", "depth", "depth_err",
              "duration", "transit_time", "depth_snr", "log_likelihood"),
             args
@@ -742,7 +739,18 @@ class TransitPeriodogramResults(dict):
     def __dir__(self):
         return list(self.keys())
 
-    def assert_allclose(self, other):
+    def assert_allclose(self, other, **kwargs):
+        """Assert that another BLSResults object is consistent
+
+        This method loops over all attributes and compares the values using
+        :func:`~astropy.tests.helper.assert_quantity_allclose` function.
+
+        Parameters
+        ----------
+        other : BLSResults
+            The other results object to compare.
+
+        """
         for k, v in self.items():
             if k not in other:
                 raise AssertionError("missing key '{0}'".format(k))
@@ -752,6 +760,4 @@ class TransitPeriodogramResults(dict):
                     .format(v, other[k])
                 )
                 continue
-            assert_quantity_allclose(v, other[k],
-                                     err_msg="Mismatch in attribute '{0}'"
-                                     .format(k))
+            assert_quantity_allclose(v, other[k], **kwargs)
