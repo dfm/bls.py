@@ -1,7 +1,8 @@
-Transit Periodogram
-===================
+bls.py
+======
 
-A reference implementation of the transit periodogram for AstroPy.
+An efficient reference implementation of the box least squares algorithm for
+transiting exoplanet search in Python.
 This will eventually be submitted as a pull request to the core AstroPy package, but
 we're making it available here for now to make it easy to use right away.
 
@@ -22,15 +23,15 @@ To install, clone this repository and build the extension as follows:
 
 .. code-block:: bash
     
-    git clone https://github.com/dfm/astropy-transit-periodogram.git
-    cd astropy-transit-periodogram
+    git clone https://github.com/dfm/bls.py.git
+    cd bls.py
     python setup.py install
     
 or, install using ``pip``:
 
 .. code-block:: bash
 
-    pip install https://github.com/dfm/astropy-transit-periodogram/archive/master.zip
+    pip install bls.py
     
 **OpenMP support**: This algorithm can optionally be parallelized using OpenMP.
 To enable this feature, you must compile with a compiler that supports OpenMP and the
