@@ -21,7 +21,7 @@ def get_extensions():
 
 setup(
     name="bls.py",
-    version="0.1.0",
+    version="0.1.1",
     author="Daniel Foreman-Mackey & Ze Vinicius",
     author_email="foreman.mackey@gmail.com",
     url="https://github.com/dfm/bls.py",
