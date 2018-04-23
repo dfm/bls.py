@@ -1,0 +1,2 @@
+include README.rst LICENSE bls/_impl.pyx
+exclude bls/_impl.c

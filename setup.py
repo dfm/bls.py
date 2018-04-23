@@ -21,7 +21,7 @@ def get_extensions():
 
 setup(
     name="bls.py",
-    version="0.1.1",
+    version="0.1.2",
     author="Daniel Foreman-Mackey & Ze Vinicius",
     author_email="foreman.mackey@gmail.com",
     url="https://github.com/dfm/bls.py",
@@ -30,5 +30,5 @@ setup(
     license="BSD",
     packages=["bls"],
     ext_modules=get_extensions(),
-    setup_require=["numpy", "cython"],
+    setup_requires=["numpy", "cython"],
 )
