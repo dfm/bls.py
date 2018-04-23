@@ -25,6 +25,8 @@ setup(
     author="Daniel Foreman-Mackey & Ze Vinicius",
     author_email="foreman.mackey@gmail.com",
     url="https://github.com/dfm/bls.py",
+    description="A reference implementation of box least squares in Python",
+    long_description=open("README.rst").read(),
     license="BSD",
     packages=["bls"],
     ext_modules=get_extensions(),
