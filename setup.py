@@ -25,6 +25,7 @@ def get_extensions():
                 pybind11.get_include(False),
                 pybind11.get_include(True),
                 numpy.get_include(),
+                "/usr/local/include/eigen3",
             ],
             language="c++",
             extra_compile_args=["-O2", "-std=c++14", "-stdlib=libc++"],
