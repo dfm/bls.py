@@ -6,17 +6,32 @@ from setuptools import setup, Extension
 
 
 def get_extensions():
+    import pybind11
     import numpy
     from Cython.Build import cythonize
-    ext = Extension(
-        "bls._impl",
-        sources=[
-            os.path.join("bls", "bls.c"),
-            os.path.join("bls", "_impl.pyx"),
-        ],
-        include_dirs=[numpy.get_include()],
-    )
-    return cythonize([ext])
+    exts = [
+        Extension(
+            "bls._impl",
+            sources=[
+                os.path.join("bls", "bls.c"),
+                os.path.join("bls", "_impl.pyx"),
+            ],
+            include_dirs=[numpy.get_include()],
+        ),
+        Extension(
+            "bls.grid_search",
+            [os.path.join("bls", "grid_search.cc")],
+            include_dirs=[
+                pybind11.get_include(False),
+                pybind11.get_include(True),
+                numpy.get_include(),
+            ],
+            language="c++",
+            extra_compile_args=["-O2", "-std=c++14", "-stdlib=libc++"],
+        ),
+    ]
+
+    return cythonize(exts)
 
 
 setup(
@@ -30,5 +45,5 @@ setup(
     license="BSD",
     packages=["bls"],
     ext_modules=get_extensions(),
-    setup_requires=["numpy", "cython"],
+    setup_requires=["numpy", "cython", "pybind11"],
 )
