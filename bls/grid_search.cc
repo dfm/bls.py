@@ -20,6 +20,7 @@ auto compute_bins (
   const Ref<const Matrix<double, Dynamic, 1>>& durations,
   int oversample
 ) {
+  double eps = std::numeric_limits<double>::epsilon();
   int N = t.rows();
   int n_durations = durations.rows();
   double delta_bin = durations.minCoeff() / oversample;
@@ -68,7 +69,7 @@ auto compute_bins (
       double denom = denominator(upper) - denominator(n);
 
       // No points in transit
-      if (denom <= std::numeric_limits<double>::epsilon()) {
+      if (denom <= eps) {
         delta_log_like(n, m) = 0.0;
         depth(n, m)          = 0.0;
         depth_ivar(n, m)     = 0.0;
